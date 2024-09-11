@@ -84,3 +84,26 @@ class BtcNode:
             except Exception:
                 pass
             sleep(0.1)
+
+    def create_wallet(self, wallet):
+        request = {
+            "method": "createwallet",
+            "params": {"wallet_name": "jm_wallet", "descriptors": False},
+        }
+
+        request["jsonrpc"] = "2.0"
+        request["id"] = "1"
+        try:
+            response = requests.post(
+                f"http://{self.host}:{self.port}",
+                data=json.dumps(request),
+                auth=("user", "password"),
+                proxies=dict(http=self.proxy),
+                timeout=5,
+            )
+        except requests.exceptions.Timeout:
+            print("timeout")
+        if response.json()["error"] is not None:
+            print(response.json())
+            raise Exception(response.json()["error"])
+        print(response.json())
