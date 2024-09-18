@@ -115,18 +115,19 @@ def fund_distributor(btc_amount):
     print(f"- funded (current balance {balance / BTC:.8f} BTC)")
 
 
-def init_joinmarket_clientserver(name):
-    return JoinMarketClientServer(name)
+def init_joinmarket_clientserver(name, port, host="localhost"):
+    return JoinMarketClientServer(name=name, port=port)
 
 
-def start_client(idx):
+def start_client(idx: int):
     name = f"joinmarket-client-server-{idx:03}"
+    port = 28184 + idx
     try:
         ip, manager_ports = driver.run(
             name,
             "joinmarket-client-server:latest",
             env={},
-            ports={37128: 37129 + idx},
+            ports={28183: port},
             cpu=(0.1),
             memory=(768),
         )
@@ -134,15 +135,18 @@ def start_client(idx):
         print(f"- could not start {name} ({e})")
         return None
 
-    # client = init_joinmarket_clientserver(name)
-    #
+    print(f"driver starting {name}")
+
+    client = init_joinmarket_clientserver(name=name,
+                                          port=port)
+    return client
     # start = time()
-    # if not client.wait_wallet(timeout=60):
+    # # if not client.wait_wallet(timeout=60):
+    # if not client.wait_ready():
     #     print(
     #         f"- could not start {name} (application timeout {time() - start} seconds)"
     #     )
     #     return None
-    #
     # print(f"- started {client.name} (wait took {time() - start} seconds)")
 
 

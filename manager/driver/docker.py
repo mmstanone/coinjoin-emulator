@@ -93,7 +93,7 @@ class DockerDriver(Driver):
         for container in self.client.containers.list():
             if any(
                 x in container.attrs["Config"]["Image"]
-                for x in ("btc-node", "wasabi-backend", "wasabi-client")
+                for x in ("btc-node", "wasabi-backend", "wasabi-client", "joinmarket-client-server")
             ):
                 containers.append(container)
 

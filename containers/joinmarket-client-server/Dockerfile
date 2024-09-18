@@ -5,8 +5,6 @@ FROM joinmarket-test
 
 # Starts the RPC server
 # RUN python3 /jm/clientserver/scripts/jmwalletd.py
-# Expose the port
-EXPOSE 27183
 
 RUN useradd -ms /bin/sh joinmarket
 USER 1000:1000

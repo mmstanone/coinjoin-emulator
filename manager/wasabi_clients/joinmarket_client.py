@@ -1,161 +1,97 @@
 import json
-import random
 import requests
-from time import sleep, time
+from time import sleep
+from urllib3.exceptions import InsecureRequestWarning
 
 WALLET_NAME = "wallet"
+PASSWORD = "password"
+WALLET_TYPE = "sw"
 
 
 class JoinMarketClientServer:
-    # TODO: rewrite this class to use the JoinMarket RPC API
     def __init__(
         self,
         host="localhost",
-        port=37128,
-        name="wasabi-client",
+        port=28183,
+        walletname=WALLET_NAME,
+        name="joinmarket-client-server",
         proxy="",
-        version="2.0.4",
+        version="",
         delay=(0, 0),
         stop=(0, 0),
     ):
         self.host = host
         self.port = port
+        self.walletname = walletname  # Store walletname as an instance variable
         self.name = name
         self.proxy = proxy
         self.version = version
         self.delay = delay
         self.stop = stop
+        self.token = ""
+        self.refresh_token = ""
 
-    def _rpc(self, request, wallet=True, timeout=5, repeat=1):
-        request["jsonrpc"] = "2.0"
-        request["id"] = "1"
-
-        if self.version < "2.0.4":
-            wallet = False
+    def _rpc(self, method, endpoint, json_data=None, timeout=5, repeat=1) -> dict:
+        headers = {}
+        if self.token:
+            headers['Authorization'] = f'Bearer {self.token}'
 
         for _ in range(repeat):
             try:
-                response = requests.post(
-                    f"http://{self.host}:{self.port}/{WALLET_NAME if wallet else ''}",
-                    data=json.dumps(request),
+                response = requests.request(
+                    method=method,
+                    url=f"https://{self.host}:{self.port}/api/v1{endpoint}",
+                    json=json_data or {},
+                    headers=headers,
                     proxies=dict(http=self.proxy),
                     timeout=timeout,
+                    verify=False,
                 )
             except requests.exceptions.Timeout:
                 continue
-            if "error" in response.json():
-                raise Exception(response.json()["error"])
-            if "result" in response.json():
-                return response.json()["result"]
-            return None
-        return "timeout"
+            except InsecureRequestWarning:
+                continue
+
+            if response.status_code >= 400:
+                try:
+                    print(response.json())
+                    error_message = response.json().get("message", "Unknown error")
+                except json.JSONDecodeError:
+                    error_message = response.text
+                raise Exception(f"Error {response.status_code}: {error_message}")
+
+            return response.json()
+        raise Exception("timeout")
 
     def get_status(self):
-        request = {
-            "method": "getstatus",
+        method = "GET"
+        endpoint = "/session"
+        return self._rpc(method, endpoint)
+
+    def _create_wallet(self, walletname=None):
+        """Create a new wallet and store its name."""
+        method = "POST"
+        endpoint = "/wallet/create"
+        self.walletname = walletname or self.walletname or WALLET_NAME
+        data = {
+            "walletname": self.walletname,
+            "password": PASSWORD,
+            "wallettype": WALLET_TYPE
         }
-        return self._rpc(request, wallet=False)
+        response = self._rpc(method, endpoint, json_data=data)
+        self.token = response.get("token", "")
+        self.refresh_token = response.get("refresh_token", "")
+        return response
 
-    def _create_wallet(self):
-        request = {
-            "method": "createwallet",
-            "params": [WALLET_NAME, ""],
-        }
-        return self._rpc(request)
-
-    def get_new_address(self):
-        request = {
-            "method": "getnewaddress",
-            "params": ["label"],
-        }
-        return self._rpc(request)["address"]
-
-    def get_balance(self, timeout=None):
-        request = {
-            "method": "getwalletinfo",
-        }
-        return self._rpc(request, timeout=timeout)["balance"]
-
-    def wait_wallet(self, timeout=None):
-        start = time()
-        while timeout is None or time() - start < timeout:
-            try:
-                self._create_wallet()
-            except:
-                pass
-
-            try:
-                self.get_balance(timeout=5)
-                return True
-            except:
-                pass
-
-            sleep(0.1)
-        return False
-
-    def _list_unspent_coins(self):
-        request = {
-            "method": "listunspentcoins",
-        }
-        return self._rpc(request)
-
-    def send(self, invoices):
-        unspent_coins = self._list_unspent_coins()
-        random.shuffle(unspent_coins)
-
-        cost = sum(map(lambda x: x[1], invoices))
-        coins = []
-        for coin in unspent_coins:
-            coins.append({"transactionid": coin["txid"], "index": coin["index"]})
-            cost -= coin["amount"]
-            if cost < 0:
-                break
-        else:
-            raise Exception("Not enough BTC")
-
-        payments = list(map(lambda x: {"sendto": x[0], "amount": x[1]}, invoices))
-
-        request = {
-            "method": "send",
-            "params": {
-                "payments": payments,
-                "coins": coins,
-                "feeTarget": 2,
-                "password": "",
-            },
-        }
-        return self._rpc(request, timeout=None)
-
-    def start_coinjoin(self):
-        request = {
-            "method": "startcoinjoin",
-            "params": ["", "True", "True"],
-        }
-        return self._rpc(request, timeout=None)
-
-    def stop_coinjoin(self):
-        request = {
-            "method": "stopcoinjoin",
-        }
-        return self._rpc(request, "wallet")
-
-    def list_coins(self):
-        request = {
-            "method": "listcoins",
-        }
-        return self._rpc(request, timeout=10, repeat=3)
-
-    def list_unspent_coins(self):
-        request = {
-            "method": "listunspentcoins",
-        }
-        return self._rpc(request, timeout=10, repeat=3)
-
-    def list_keys(self):
-        request = {
-            "method": "listkeys",
-        }
-        return self._rpc(request, timeout=10, repeat=3)
+    def unlock_wallet(self, password=None):
+        """Unlock an existing wallet using the stored walletname."""
+        method = "POST"
+        endpoint = f"/wallet/{self.walletname}/unlock"
+        json_data = {"password": password or PASSWORD}
+        response = self._rpc(method, endpoint, json_data=json_data)
+        self.token = response.get("token", "")
+        self.refresh_token = response.get("refresh_token", "")
+        return response
 
     def wait_ready(self):
         while True:
@@ -165,3 +101,132 @@ class JoinMarketClientServer:
             except:
                 pass
             sleep(0.1)
+
+    def display_wallet(self):
+        """Get detailed breakdown of wallet contents by account."""
+        method = "GET"
+        endpoint = f"/wallet/{self.walletname}/display"
+        response = self._rpc(method, endpoint)
+        return response
+
+    def get_yieldgen_report(self):
+        """Get the latest report on yield-generating activity."""
+        method = "GET"
+        endpoint = "/wallet/yieldgen/report"
+        response = self._rpc(method, endpoint)
+        return response
+
+    def get_new_address(self, mixdepth):
+        """Get a fresh address in the given account for depositing funds."""
+        method = "GET"
+        endpoint = f"/wallet/{self.walletname}/address/new/{mixdepth}"
+        response = self._rpc(method, endpoint)
+        return response
+
+    def get_new_timelock_address(self, lockdate):
+        """Get a fresh timelock address for depositing funds to create a fidelity bond."""
+        method = "GET"
+        endpoint = f"/wallet/{self.walletname}/address/timelock/new/{lockdate}"
+        response = self._rpc(method, endpoint)
+        return response
+
+    def list_utxos(self):
+        """List details of all UTXOs currently in the wallet."""
+        method = "GET"
+        endpoint = f"/wallet/{self.walletname}/utxos"
+        response = self._rpc(method, endpoint)
+        return response
+
+    def start_maker(
+        self,
+        txfee,
+        cjfee_a,
+        cjfee_r,
+        ordertype,
+        minsize,
+    ):
+        """
+        Start the yield generator service with the specified configuration.
+        - txfee: str or int, e.g., "0" (absolute fee in satoshis)
+        - cjfee_a: str or int, e.g., "5000" (absolute coinjoin fee in satoshis)
+        - cjfee_r: str or float, e.g., "0.00004" (relative coinjoin fee as a fraction)
+        - ordertype: str, e.g., "reloffer" or "absoffer"
+        - minsize: str or int, minimum coinjoin size in satoshis
+        """
+        method = "POST"
+        endpoint = f"/wallet/{self.walletname}/maker/start"
+        json_data = {
+            "txfee": str(txfee),
+            "cjfee_a": str(cjfee_a),
+            "cjfee_r": str(cjfee_r),
+            "ordertype": ordertype,
+            "minsize": str(minsize)
+        }
+        response = self._rpc(method, endpoint, json_data=json_data)
+        return response
+
+    def stop_maker(self):
+        """Stop the yield generator service."""
+        method = "GET"
+        endpoint = f"/wallet/{self.walletname}/maker/stop"
+        response = self._rpc(method, endpoint)
+        return response
+
+    def coinjoin(
+        self,
+        mixdepth,
+        amount_sats,
+        counterparties,
+        destination,
+        txfee=None
+    ):
+        """
+        Initiate a coinjoin as taker.
+        - mixdepth: int, the mixdepth to spend from
+        - amount_sats: int, amount in satoshis to coinjoin
+        - counterparties: int, number of counterparties to coinjoin with
+        - destination: str, address to send the coinjoined funds to
+        - txfee: optional, int, Bitcoin miner fee to use for transaction
+        """
+        method = "POST"
+        endpoint = f"/wallet/{self.walletname}/taker/coinjoin"
+        json_data = {
+            "mixdepth": mixdepth,
+            "amount_sats": amount_sats,
+            "counterparties": counterparties,
+            "destination": destination
+        }
+        if txfee is not None:
+            json_data["txfee"] = txfee
+        response = self._rpc(method, endpoint, json_data=json_data)
+        return response
+
+    def run_schedule(self, destination_addresses, tumbler_options=None):
+        """
+        Create and run a schedule of transactions.
+        - destination_addresses: list of str, addresses to send funds to
+        - tumbler_options: optional, dict, additional tumbler configuration options
+        """
+        method = "POST"
+        endpoint = f"/wallet/{self.walletname}/taker/schedule"
+        json_data = {
+            "destination_addresses": destination_addresses,
+        }
+        if tumbler_options:
+            json_data["tumbler_options"] = tumbler_options
+        response = self._rpc(method, endpoint, json_data=json_data)
+        return response
+
+    def get_schedule(self):
+        """Get the schedule that is currently running."""
+        method = "GET"
+        endpoint = f"/wallet/{self.walletname}/taker/schedule"
+        response = self._rpc(method, endpoint)
+        return response
+
+    def stop_taker(self):
+        """Stop a running coinjoin attempt."""
+        method = "GET"
+        endpoint = f"/wallet/{self.walletname}/taker/stop"
+        response = self._rpc(method, endpoint)
+        return response
