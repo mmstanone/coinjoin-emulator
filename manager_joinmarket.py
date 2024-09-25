@@ -40,7 +40,7 @@ args = None
 driver = None
 node = None
 coordinator = None
-distributor = None
+distributor: JoinMarketClientServer = None
 clients = []
 versions = set()
 invoices = {}
@@ -101,25 +101,52 @@ def start_infrastructure():
     # TODO: Initiate TOR
     # TODO: Initiate IRC
 
+    start_distributor()
+
+def start_distributor():
+    name = "joinmarket-distributor"
+    port = 28183  # Use a specific port for the distributor
+    try:
+        ip, manager_ports = driver.run(
+            name,
+            "joinmarket-client-server:latest",
+            env={},  # Add any necessary environment variables
+            ports={28183: port},
+            cpu=1.0,
+            memory=2048,
+        )
+    except Exception as e:
+        print(f"- could not start {name} ({e})")
+        raise Exception("Could not start distributor")
+
+    global distributor
+    distributor = init_joinmarket_clientserver(name=name, port=port)
+
+    start = time()
+    if not distributor.wait_wallet(timeout=60):
+        print(f"- could not start {name} (application timeout)")
+        raise Exception("Could not start distributor")
+    print(f"- started distributor")
 
 
 def fund_distributor(btc_amount):
     print("Funding distributor")
     for _ in range(DISTRIBUTOR_UTXOS):
         node.fund_address(
-            distributor.get_new_address(),
+            distributor.get_new_address()['address'],
             math.ceil(btc_amount * BTC / DISTRIBUTOR_UTXOS) // BTC,
         )
-    while (balance := distributor.get_balance()) < btc_amount * BTC:
-        sleep(1)
-    print(f"- funded (current balance {balance / BTC:.8f} BTC)")
+
+    # while (balance := distributor.get_address_balance()) < btc_amount * BTC:
+    #     sleep(1)
+    # print(f"- funded (current balance {balance / BTC:.8f} BTC)")
 
 
 def init_joinmarket_clientserver(name, port, host="localhost"):
     return JoinMarketClientServer(name=name, port=port)
 
 
-def start_client(idx: int):
+def start_client(idx: int, wallet=None):
     name = f"joinmarket-client-server-{idx:03}"
     port = 28184 + idx
     try:
@@ -139,15 +166,16 @@ def start_client(idx: int):
 
     client = init_joinmarket_clientserver(name=name,
                                           port=port)
+
+    start = time()
+    if not client.wait_wallet(timeout=60):
+        print(
+            f"- could not start {name} (application timeout {time() - start} seconds)"
+        )
+        return None
+
+    print(f"- started {client.name} (wait took {time() - start} seconds)")
     return client
-    # start = time()
-    # # if not client.wait_wallet(timeout=60):
-    # if not client.wait_ready():
-    #     print(
-    #         f"- could not start {name} (application timeout {time() - start} seconds)"
-    #     )
-    #     return None
-    # print(f"- started {client.name} (wait took {time() - start} seconds)")
 
 
 def start_clients(wallets):
@@ -185,6 +213,96 @@ def start_clients(wallets):
                 f"- failed to start {len(wallets) - len(new_clients)} clients; continuing ..."
             )
     clients.extend(new_clients)
+
+
+def prepare_invoices(wallets):
+    print("Preparing funding requests")
+    client_invoices = [
+        (client, wallet.get("funds", [])) for client, wallet in zip(clients, wallets)
+    ]
+
+    global invoices
+    invoices = {}
+
+    for client, funds in client_invoices:
+        for fund in funds:
+            block = 0
+            round = 0
+            if isinstance(fund, int):
+                value = fund
+            elif isinstance(fund, dict):
+                value = fund.get("value", 0)
+                block = fund.get("delay_blocks", 0)
+                round = fund.get("delay_rounds", 0)
+            else:
+                continue  # Skip if fund is neither int nor dict
+
+            # Get a new address from the client to receive funds
+            address = client.get_new_address()['address']
+            addressed_funding = (address, value)
+
+            # Organize funding requests based on delay
+            if (block, round) not in invoices:
+                invoices[(block, round)] = [addressed_funding]
+            else:
+                invoices[(block, round)].append(addressed_funding)
+
+    # Randomize the order within each delay group
+    for addressed_fundings in invoices.values():
+        random.shuffle(addressed_fundings)
+
+    total_requests = sum(len(requests) for requests in invoices.values())
+    print(f"- prepared {total_requests} funding requests")
+
+
+
+def pay_invoices():
+    print("Distributing funds to clients")
+
+    global current_block
+    global current_round
+
+    due_keys = [
+        key for key in invoices.keys()
+        if key[0] <= current_block and key[1] <= current_round
+    ]
+
+    for key in due_keys:
+        addressed_fundings = invoices.pop(key, [])
+        try:
+            for address, amount in addressed_fundings:
+                distributor.simple_send(destination_address=address, amount_sats=amount)
+                print(f"- sent {amount} sats to {address}")
+                sleep(5)  # The btc node needs time to process the transaction
+        except Exception as e:
+            print(f"- error during fund distribution: {e}")
+            raise e
+
+def simulate_fund_payments():
+    print("Simulating fund payments")
+    global current_round
+    global current_block
+
+    # Initialize current_round and current_block
+    current_round = 0
+    current_block = 0
+
+    # Continue until all funding requests have been processed
+    while invoices:
+        print(f"Current round: {current_round}, Current block: {current_block}")
+        # Process due funding requests
+        pay_invoices()
+
+        # Increment rounds and blocks as needed
+        current_round += 1
+        current_block += 1  # If you want blocks to increase separately, adjust accordingly
+
+        # Optional: Sleep to simulate time passing
+        sleep(1)  # Uncomment if you want to add delay
+
+    node.mine_block()
+
+    print("All funding requests have been processed.")
 
 
 def run():
@@ -328,6 +446,20 @@ if __name__ == "__main__":
             run()
         case "console":
             print("Starting console")
+            prepare_images()
+            start_infrastructure()
+            fund_distributor(1000)
+            start_clients(SCENARIO["wallets"])
+            prepare_invoices(SCENARIO["wallets"])
+            simulate_fund_payments()
+
+            # clients[0].start_maker(0,200,0.0004,"absoffer",2000)
+            # clients[1].start_maker(0, 200, 0.0004, "absoffer", 2000)
+            # address = clients[2].get_new_address()
+            # clients[2].coinjoin(0, 5000, 2, "bcrt1qjy6c68pl3v33nkdf3q3c2jc2yjp4g7xf39fvh6")
+
+
+            driver.cleanup(args.image_prefix)
         case _:
             print(f"Unknown command '{args.command}'")
             exit(1)

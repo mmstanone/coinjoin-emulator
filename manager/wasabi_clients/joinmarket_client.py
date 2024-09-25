@@ -1,6 +1,8 @@
 import json
+from asyncio import timeout
+
 import requests
-from time import sleep
+from time import sleep, time
 from urllib3.exceptions import InsecureRequestWarning
 
 WALLET_NAME = "wallet"
@@ -52,6 +54,9 @@ class JoinMarketClientServer:
             except InsecureRequestWarning:
                 continue
 
+            if response.status_code == 401:
+                self.unlock_wallet()
+
             if response.status_code >= 400:
                 try:
                     print(response.json())
@@ -93,14 +98,24 @@ class JoinMarketClientServer:
         self.refresh_token = response.get("refresh_token", "")
         return response
 
-    def wait_ready(self):
-        while True:
+
+    def wait_wallet(self, timeout=None):
+        start = time()
+        while timeout is None or time() - start < timeout:
             try:
-                self.get_status()
-                break
-            except:
+                self._create_wallet()
+            except Exception as e:
                 pass
+
+            try:
+                self.get_balance()
+                return True
+            except Exception as e:
+                pass
+
             sleep(0.1)
+        return False
+
 
     def display_wallet(self):
         """Get detailed breakdown of wallet contents by account."""
@@ -109,6 +124,18 @@ class JoinMarketClientServer:
         response = self._rpc(method, endpoint)
         return response
 
+    def get_balance(self):
+        """Retrieve the available balance of the wallet.
+        Returns: str: The available balance as a string in BTC (e.g., '0.00000000').
+        Raises: Exception: If the balance information cannot be retrieved.
+        """
+        response = self.display_wallet()
+        try:
+            available_balance = response['walletinfo']['available_balance']
+            return available_balance
+        except KeyError as e:
+            raise Exception(f"Could not retrieve available balance: {e}")
+
     def get_yieldgen_report(self):
         """Get the latest report on yield-generating activity."""
         method = "GET"
@@ -116,7 +143,7 @@ class JoinMarketClientServer:
         response = self._rpc(method, endpoint)
         return response
 
-    def get_new_address(self, mixdepth):
+    def get_new_address(self, mixdepth=0):
         """Get a fresh address in the given account for depositing funds."""
         method = "GET"
         endpoint = f"/wallet/{self.walletname}/address/new/{mixdepth}"
@@ -230,3 +257,32 @@ class JoinMarketClientServer:
         endpoint = f"/wallet/{self.walletname}/taker/stop"
         response = self._rpc(method, endpoint)
         return response
+
+    def simple_send(self, destination_address, amount_sats, mixdepth=0, txfee=5000):
+        """
+        Send funds to a single address without coinjoin.
+        - destination_address: str, address to send funds to
+        - amount_sats: int, amount in satoshis to send
+        - mixdepth: int, the mixdepth to spend from
+        - txfee: int, miner fee in satoshis
+        """
+        method = "POST"
+        endpoint = f"/wallet/{self.walletname}/taker/direct-send"
+        json_data = {
+            "destination": destination_address,
+            "amount_sats": amount_sats,
+            "txfee": txfee,
+            "mixdepth": mixdepth,
+        }
+        start = time()
+        while time() - start < 30:
+            try:
+                response = self._rpc(method, endpoint, json_data=json_data)
+                return response
+            except Exception as e:
+                print(e)
+                sleep(2)
+
+        print("Failed to send funds, attempt timed out.")
+
+        return False
