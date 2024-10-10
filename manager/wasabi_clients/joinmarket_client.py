@@ -56,6 +56,7 @@ class JoinMarketClientServer:
 
             if response.status_code == 401:
                 self.unlock_wallet()
+                continue
 
             if response.status_code >= 400:
                 try:

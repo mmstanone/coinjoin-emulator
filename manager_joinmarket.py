@@ -1,17 +1,11 @@
 from manager.btc_node import BtcNode
-from manager.wasabi_backend import WasabiBackend
-from manager.wasabi_clients import WasabiClient
-from manager import utils
 import manager.commands.genscen
 from time import sleep, time
 import sys
 import random
 import os
-import datetime
 import json
 import argparse
-import shutil
-import tempfile
 import multiprocessing
 import multiprocessing.pool
 import math
@@ -35,6 +29,7 @@ SCENARIO = {
         {"funds": [3000000, 600000]},
     ],
 }
+INSPIRCD_IMAGE = "inspircd/inspircd-docker:latest"
 
 args = None
 driver = None
@@ -73,13 +68,41 @@ def prepare_images():
     print("Preparing images")
     prepare_image("btc-node")
     prepare_image("joinmarket-client-server")
+    prepare_image(INSPIRCD_IMAGE)
     # prepare_image("tor-socks-proxy")
-    # prepare_image("irc-server")
     # prepare_client_images()
+
+
+def start_irc_server():
+    name = "irc-server"
+    config_path = "containers/irc-server/inspircd.conf"
+
+    # Determine the absolute path to the inspircd.conf file based on the script's directory
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    config_path = os.path.join(script_dir, config_path)
+
+
+    try:
+        ip, manager_ports = driver.run(
+            name,
+            INSPIRCD_IMAGE,
+            env={},  # Add any necessary environment variables
+            ports={6667: 6667},
+            cpu=1.0,
+            memory=2048,
+            volumes={config_path: {'bind': '/inspircd/conf/inspircd.conf', 'mode': 'ro'}}
+        )
+    except Exception as e:
+        print(f"- could not start {name} ({e})")
+        raise Exception("Could not start IRC server")
+
 
 
 def start_infrastructure():
     print("Starting infrastructure")
+    start_irc_server()
+    print("- started irc-server")
+
     btc_node_ip, btc_node_ports = driver.run(
         "btc-node",
         f"{args.image_prefix}btc-node",
@@ -99,8 +122,6 @@ def start_infrastructure():
     node.create_wallet("jm_wallet")
 
     # TODO: Initiate TOR
-    # TODO: Initiate IRC
-
     start_distributor()
 
 def start_distributor():
@@ -301,6 +322,7 @@ def simulate_fund_payments():
         sleep(1)  # Uncomment if you want to add delay
 
     node.mine_block()
+    sleep(5)
 
     print("All funding requests have been processed.")
 
@@ -453,10 +475,11 @@ if __name__ == "__main__":
             prepare_invoices(SCENARIO["wallets"])
             simulate_fund_payments()
 
-            # clients[0].start_maker(0,200,0.0004,"absoffer",2000)
-            # clients[1].start_maker(0, 200, 0.0004, "absoffer", 2000)
-            # address = clients[2].get_new_address()
-            # clients[2].coinjoin(0, 5000, 2, "bcrt1qjy6c68pl3v33nkdf3q3c2jc2yjp4g7xf39fvh6")
+            clients[0].start_maker(0,200,0.0004,"absoffer",2000)
+            clients[1].start_maker(0, 200, 0.0004, "absoffer", 2000)
+            address = clients[2].get_new_address()['address']
+
+            clients[2].coinjoin(0, 5000, 2, address)
 
 
             driver.cleanup(args.image_prefix)

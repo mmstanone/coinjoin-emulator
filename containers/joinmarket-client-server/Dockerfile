@@ -24,4 +24,3 @@ WORKDIR /home/joinmarket
 
 CMD ["./run.sh"]
 
-
