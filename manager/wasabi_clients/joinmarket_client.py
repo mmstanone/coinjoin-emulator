@@ -19,6 +19,7 @@ class JoinMarketClientServer:
         name="joinmarket-client-server",
         proxy="",
         version="",
+        type="maker",
         delay=(0, 0),
         stop=(0, 0),
     ):
@@ -28,6 +29,9 @@ class JoinMarketClientServer:
         self.name = name
         self.proxy = proxy
         self.version = version
+        self.type = type
+        self.maker_running = False
+        self.coinjoin_in_process = False
         self.delay = delay
         self.stop = stop
         self.token = ""
@@ -72,7 +76,10 @@ class JoinMarketClientServer:
     def get_status(self):
         method = "GET"
         endpoint = "/session"
-        return self._rpc(method, endpoint)
+        response = self._rpc(method, endpoint)
+        self.maker_running = response.get("maker_running", False)
+        self.coinjoin_in_process = response.get("coinjoin_in_process", False)
+        return response
 
     def _create_wallet(self, walletname=None):
         """Create a new wallet and store its name."""
@@ -252,8 +259,14 @@ class JoinMarketClientServer:
         response = self._rpc(method, endpoint)
         return response
 
-    def stop_taker(self):
+    def stop_coinjoin(self):
         """Stop a running coinjoin attempt."""
+        if self.type == "taker":
+            return self.stop_taker()
+        else:
+            return self.stop_maker()
+
+    def stop_taker(self):
         method = "GET"
         endpoint = f"/wallet/{self.walletname}/taker/stop"
         response = self._rpc(method, endpoint)

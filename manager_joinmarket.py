@@ -21,15 +21,15 @@ BTC = 100_000_000
 SCENARIO = {
     "name": "default",
     "rounds": 10,  # the number of coinjoins after which the simulation stops (0 for no limit)
-    "blocks": 0,  # the number of mined blocks after which the simulation stops (0 for no limit)
+    "blocks": 10,  # the number of mined blocks after which the simulation stops (0 for no limit)
     "default_version": "2.0.4",
     "wallets": [
-        {"funds": [200000, 50000], "anon_score_target": 7},
-        {"funds": [3000000], "redcoin_isolation": True},
-        {"funds": [1000000, 500000], "skip_rounds": [0, 1, 2]},
-        {"funds": [3000000, 15000]},
-        {"funds": [1000000, 500000]},
-        {"funds": [3000000, 600000]},
+        {"funds": [200000, 50000], "type": "maker"},
+        {"funds": [3000000], "type": "maker"},
+        {"funds": [1000000, 500000], "type": "taker"},
+        {"funds": [3000000, 15000], "type": "maker"},
+        {"funds": [1000000, 500000], "type": "maker"},
+        {"funds": [3000000, 600000], "type": "maker"},
     ],
 }
 INSPIRCD_IMAGE = "inspircd/inspircd-docker:latest"
@@ -159,8 +159,8 @@ def fund_distributor(btc_amount):
     # print(f"- funded (current balance {balance / BTC:.8f} BTC)")
 
 
-def init_joinmarket_clientserver(name, port, host="localhost"):
-    return JoinMarketClientServer(name=name, port=port)
+def init_joinmarket_clientserver(name, port, host="localhost", type="maker"):
+    return JoinMarketClientServer(name=name, port=port, type=type)
 
 
 def start_client(idx: int, wallet=None):
@@ -182,7 +182,8 @@ def start_client(idx: int, wallet=None):
     print(f"driver starting {name}")
 
     client = init_joinmarket_clientserver(name=name,
-                                          port=port)
+                                          port=port,
+                                          type=wallet.get("type", "maker"))
 
     start = time()
     if not client.wait_wallet(timeout=60):
@@ -395,28 +396,25 @@ def stop_coinjoins():
         print(f"- stopped mixing {client.name}")
 
 
+def update_coinjoins_joinmarket():
+    for client in clients:
+        state = client.get_status()
+        print(state)
+        if client.type == "maker" and not client.maker_running:
+            client.start_maker(0, 5000, 0.00004, "sw0reloffer", 30000)
+
+        if client.type == "taker" and not client.coinjoin_in_process:
+            address = client.get_new_address()['address']
+            client.start_coinjoin(0, 40000, 4, address)
+
+
 def run_joinmarket():
-    pay_invoices()
+    global current_block
+
 
     initial_block = node.get_block_count()
     # TODO: As there is no single coordinator and multiple takers, you need to change the logic
-    while (SCENARIO["rounds"] == 0 or current_round < SCENARIO["rounds"]) and (
-            SCENARIO["blocks"] == 0 or current_block < SCENARIO["blocks"]
-    ):
-        for _ in range(3):
-            try:
-                current_round = sum(
-                    1
-                    for _ in driver.peek(
-                        "wasabi-backend",
-                        "/home/wasabi/.walletwasabi/backend/WabiSabi/CoinJoinIdStore.txt",
-                    ).split("\n")[:-1]
-                )
-                break
-            except Exception as e:
-                print(f"- could not get rounds".ljust(60), end="\r")
-                print(f"Round exception: {e}", file=sys.stderr)
-
+    while (SCENARIO["blocks"] == 0 or current_block < SCENARIO["blocks"]):
         for _ in range(3):
             try:
                 current_block = node.get_block_count() - initial_block
@@ -425,7 +423,8 @@ def run_joinmarket():
                 print(f"- could not get blocks".ljust(60), end="\r")
                 print(f"Block exception: {e}", file=sys.stderr)
 
-        update_coinjoins()
+        update_coinjoins_joinmarket()
+
         print(
             f"- coinjoin rounds: {current_round} (block {current_block})".ljust(60),
             end="\r",
@@ -449,6 +448,22 @@ def run():
         global current_round
         global current_block
 
+        simulate_fund_payments()
+
+        node.mine_block()
+        node.mine_block()
+        node.mine_block()
+        node.mine_block()
+        node.mine_block()
+
+        clients[0].start_maker(0, 5000, 0.00004, "sw0reloffer", 30000)
+        clients[1].start_maker(0, 5000, 0.00004, "sw0reloffer", 30000)
+        clients[3].start_maker(0, 5000, 0.00004, "sw0reloffer", 30000)
+        clients[4].start_maker(0, 5000, 0.00004, "sw0reloffer", 30000)
+
+        address = clients[2].get_new_address()['address']
+        clients[2].start_coinjoin(0, 40000, 4, address)
+
         run_joinmarket()
 
     except KeyboardInterrupt:
@@ -457,7 +472,7 @@ def run():
     except Exception as e:
         print(f"Terminating exception: {e}", file=sys.stderr)
     finally:
-        stop_coinjoins()
+        # stop_coinjoins()
         if not args.no_logs:
             store_logs("/home/joinmarket/")
         driver.cleanup(args.image_prefix)
@@ -605,7 +620,6 @@ if __name__ == "__main__":
             clients[4].start_maker(0, 5000, 0.00004, "sw0reloffer",30000)
 
             address = clients[2].get_new_address()['address']
-
             clients[2].start_coinjoin(0, 40000, 4, address)
 
             sleep(120)
