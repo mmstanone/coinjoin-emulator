@@ -179,7 +179,7 @@ class JoinMarketClientServer:
         - cjfee_a: str or int, e.g., "5000" (absolute coinjoin fee in satoshis)
         - cjfee_r: str or float, e.g., "0.00004" (relative coinjoin fee as a fraction)
         - ordertype: str, e.g., "reloffer" or "absoffer"
-        - minsize: str or int, minimum coinjoin size in satoshis
+        - minsize: str or int, minimum coinjoin size in satoshis. Should be higher then 27300sats
         """
         method = "POST"
         endpoint = f"/wallet/{self.walletname}/maker/start"
@@ -200,7 +200,7 @@ class JoinMarketClientServer:
         response = self._rpc(method, endpoint)
         return response
 
-    def coinjoin(
+    def start_coinjoin(
         self,
         mixdepth,
         amount_sats,
@@ -287,3 +287,34 @@ class JoinMarketClientServer:
         print("Failed to send funds, attempt timed out.")
 
         return False
+
+    def list_unspent_coins(self):
+        """List all unspent coins in the wallet."""
+        method = "GET"
+        endpoint = f"/wallet/{self.walletname}/utxos"
+        response = self._rpc(method, endpoint)
+        return response
+
+    def list_transactions_maker(self):
+        """List all transactions in the wallet."""
+        method = "GET"
+        endpoint = f"/wallet/yieldgen/report"
+        response = self._rpc(method, endpoint)
+        return response
+
+
+    def list_coins(self):
+        """List all coins in the wallet."""
+        return "This method is not available in joinmarket"
+        # method = "GET"
+        # endpoint = f"/wallet/{self.walletname}/coins"
+        # response = self._rpc(method, endpoint)
+        # return response
+
+    def list_keys(self):
+        """List all keys in the wallet."""
+        return "This method is not available in joinmarket"
+        # method = "GET"
+        # endpoint = f"/wallet/{self.walletname}/keys"
+        # response = self._rpc(method, endpoint)
+        # return response

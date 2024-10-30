@@ -38,6 +38,7 @@ class DockerDriver(Driver):
         cpu=0.1,
         memory=768,
         volumes=None,
+        cap_add=None,
     ):
         self.client.containers.run(
             image,
@@ -48,7 +49,8 @@ class DockerDriver(Driver):
             network=self.network.id,
             ports=ports or {},
             environment=env or {},
-            volumes=volumes or {}
+            volumes=volumes or {},
+            cap_add=cap_add or [],
         )
         return "", ports
 
@@ -95,7 +97,7 @@ class DockerDriver(Driver):
         for container in self.client.containers.list():
             if any(
                 x in container.attrs["Config"]["Image"]
-                for x in ("btc-node", "wasabi-backend", "wasabi-client", "joinmarket-client-server", "irc-server")
+                for x in ("irc-server", "btc-node", "wasabi-backend", "wasabi-client", "joinmarket-client-server")
             ):
                 containers.append(container)
 

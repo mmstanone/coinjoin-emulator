@@ -9,8 +9,11 @@ import argparse
 import multiprocessing
 import multiprocessing.pool
 import math
+import shutil
+import datetime
 
 from manager.wasabi_clients.joinmarket_client import JoinMarketClientServer
+
 
 DISTRIBUTOR_UTXOS = 20
 BATCH_SIZE = 5
@@ -33,7 +36,7 @@ INSPIRCD_IMAGE = "inspircd/inspircd-docker:latest"
 
 args = None
 driver = None
-node = None
+node: BtcNode = None
 coordinator = None
 distributor: JoinMarketClientServer = None
 clients = []
@@ -68,29 +71,23 @@ def prepare_images():
     print("Preparing images")
     prepare_image("btc-node")
     prepare_image("joinmarket-client-server")
-    prepare_image(INSPIRCD_IMAGE)
+    prepare_image("irc-server")
     # prepare_image("tor-socks-proxy")
     # prepare_client_images()
 
 
 def start_irc_server():
     name = "irc-server"
-    config_path = "containers/irc-server/inspircd.conf"
-
-    # Determine the absolute path to the inspircd.conf file based on the script's directory
-    script_dir = os.path.dirname(os.path.realpath(__file__))
-    config_path = os.path.join(script_dir, config_path)
-
 
     try:
         ip, manager_ports = driver.run(
             name,
-            INSPIRCD_IMAGE,
+            f"{args.image_prefix}irc-server",
+            cap_add=["NET_ADMIN"],
             env={},  # Add any necessary environment variables
             ports={6667: 6667},
             cpu=1.0,
             memory=2048,
-            volumes={config_path: {'bind': '/inspircd/conf/inspircd.conf', 'mode': 'ro'}}
         )
     except Exception as e:
         print(f"- could not start {name} ({e})")
@@ -121,7 +118,6 @@ def start_infrastructure():
     print("- started btc-node")
     node.create_wallet("jm_wallet")
 
-    # TODO: Initiate TOR
     start_distributor()
 
 def start_distributor():
@@ -168,7 +164,7 @@ def init_joinmarket_clientserver(name, port, host="localhost"):
 
 
 def start_client(idx: int, wallet=None):
-    name = f"joinmarket-client-server-{idx:03}"
+    name = f"jcs-{idx:03}"
     port = 28184 + idx
     try:
         ip, manager_ports = driver.run(
@@ -327,22 +323,144 @@ def simulate_fund_payments():
     print("All funding requests have been processed.")
 
 
+def store_client_logs(client, data_path, src_path="/home/wasabi/.walletwasabi/client/"):
+    sleep(random.random() * 3)
+    client_path = os.path.join(data_path, client.name)
+    os.mkdir(client_path)
+    with open(os.path.join(client_path, "coins.json"), "w") as f:
+        json.dump(client.list_coins(), f, indent=2)
+        print(f"- stored {client.name} coins")
+    with open(os.path.join(client_path, "unspent_coins.json"), "w") as f:
+        json.dump(client.list_unspent_coins(), f, indent=2)
+        print(f"- stored {client.name} unspent coins")
+    with open(os.path.join(client_path, "keys.json"), "w") as f:
+        json.dump(client.list_keys(), f, indent=2)
+        print(f"- stored {client.name} keys")
+    # with open(os.path.join(client_path, "keys.json"), "w") as f:
+    #     json.dump(client.list_transactions_maker(), f, indent=2)
+    #     print(f"- stored {client.name} keys")
+    try:
+        driver.download(client.name, src_path, client_path)
+
+        print(f"- stored {client.name} logs")
+    except:
+        print(f"- could not store {client.name} logs")
+
+
+def store_logs(src_path="/home/wasabi/.walletwasabi/client/"):
+    print("Storing logs")
+    time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
+    experiment_path = f"./logs/{time}_{SCENARIO['name']}"
+    data_path = os.path.join(experiment_path, "data")
+    os.makedirs(data_path)
+
+    with open(os.path.join(experiment_path, "scenario.json"), "w") as f:
+        json.dump(SCENARIO, f, indent=2)
+        print("- stored scenario")
+
+    stored_blocks = 0
+    node_path = os.path.join(data_path, "btc-node")
+    os.mkdir(node_path)
+    while stored_blocks < node.get_block_count():
+        block_hash = node.get_block_hash(stored_blocks)
+        block = node.get_block_info(block_hash)
+        with open(os.path.join(node_path, f"block_{stored_blocks}.json"), "w") as f:
+            json.dump(block, f, indent=2)
+        stored_blocks += 1
+    print(f"- stored {stored_blocks} blocks")
+
+    try:
+        driver.download(
+            "wasabi-backend",
+            "/home/wasabi/.walletwasabi/backend/",
+            os.path.join(data_path, "wasabi-backend"),
+        )
+
+        print(f"- stored backend logs")
+    except:
+        print(f"- could not store backend logs")
+
+    # TODO parallelize (driver cannot be simply passed to new threads)
+    for client in clients:
+        store_client_logs(client, data_path, src_path)
+
+    shutil.make_archive(experiment_path, "zip", *os.path.split(experiment_path))
+    print("- zip archive created")
+
+
+def stop_coinjoins():
+    print("Stopping coinjoins")
+    for client in clients:
+        client.stop_coinjoin()
+        print(f"- stopped mixing {client.name}")
+
+
+def run_joinmarket():
+    pay_invoices()
+
+    initial_block = node.get_block_count()
+    # TODO: As there is no single coordinator and multiple takers, you need to change the logic
+    while (SCENARIO["rounds"] == 0 or current_round < SCENARIO["rounds"]) and (
+            SCENARIO["blocks"] == 0 or current_block < SCENARIO["blocks"]
+    ):
+        for _ in range(3):
+            try:
+                current_round = sum(
+                    1
+                    for _ in driver.peek(
+                        "wasabi-backend",
+                        "/home/wasabi/.walletwasabi/backend/WabiSabi/CoinJoinIdStore.txt",
+                    ).split("\n")[:-1]
+                )
+                break
+            except Exception as e:
+                print(f"- could not get rounds".ljust(60), end="\r")
+                print(f"Round exception: {e}", file=sys.stderr)
+
+        for _ in range(3):
+            try:
+                current_block = node.get_block_count() - initial_block
+                break
+            except Exception as e:
+                print(f"- could not get blocks".ljust(60), end="\r")
+                print(f"Block exception: {e}", file=sys.stderr)
+
+        update_coinjoins()
+        print(
+            f"- coinjoin rounds: {current_round} (block {current_block})".ljust(60),
+            end="\r",
+        )
+        sleep(1)
+    print()
+    print(f"- limit reached")
+
+
 def run():
+
     try:
         print(f"=== Scenario {SCENARIO['name']} ===")
         prepare_images()
         start_infrastructure()
         fund_distributor(1000)
         start_clients(SCENARIO["wallets"])
-        # prepare_invoices(SCENARIO["wallets"])
+        prepare_invoices(SCENARIO["wallets"])
 
         print("Running simulation")
+        global current_round
+        global current_block
+
+        run_joinmarket()
+
     except KeyboardInterrupt:
         print()
         print("KeyboardInterrupt received")
     except Exception as e:
         print(f"Terminating exception: {e}", file=sys.stderr)
-
+    finally:
+        stop_coinjoins()
+        if not args.no_logs:
+            store_logs("/home/joinmarket/")
+        driver.cleanup(args.image_prefix)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run coinjoin simulation setup")
@@ -475,12 +593,26 @@ if __name__ == "__main__":
             prepare_invoices(SCENARIO["wallets"])
             simulate_fund_payments()
 
-            clients[0].start_maker(0,200,0.0004,"absoffer",2000)
-            clients[1].start_maker(0, 200, 0.0004, "absoffer", 2000)
+            node.mine_block()
+            node.mine_block()
+            node.mine_block()
+            node.mine_block()
+            node.mine_block()
+
+            clients[0].start_maker(0,5000,0.00004,"sw0reloffer", 30000)
+            clients[1].start_maker(0, 5000, 0.00004, "sw0reloffer",30000)
+            clients[3].start_maker(0,5000,0.00004,"sw0reloffer", 30000)
+            clients[4].start_maker(0, 5000, 0.00004, "sw0reloffer",30000)
+
             address = clients[2].get_new_address()['address']
 
-            clients[2].coinjoin(0, 5000, 2, address)
+            clients[2].start_coinjoin(0, 40000, 4, address)
 
+            sleep(120)
+
+            node.mine_block()
+
+            store_logs("/home/joinmarket/")
 
             driver.cleanup(args.image_prefix)
         case _:
