@@ -1,13 +1,24 @@
 import json
-from asyncio import timeout
 
 import requests
 from time import sleep, time
 from urllib3.exceptions import InsecureRequestWarning
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 
 WALLET_NAME = "wallet"
 PASSWORD = "password"
 WALLET_TYPE = "sw"
+BTC = 100_000_000
+
+
+class JoinmarketConflictException(Exception):
+    def __init__(self, message, response):
+        super().__init__(message)
+        self.response = response
+
 
 
 class JoinMarketClientServer:
@@ -32,12 +43,13 @@ class JoinMarketClientServer:
         self.type = type
         self.maker_running = False
         self.coinjoin_in_process = False
+        self.coinjoin_start = 0
         self.delay = delay
         self.stop = stop
         self.token = ""
         self.refresh_token = ""
 
-    def _rpc(self, method, endpoint, json_data=None, timeout=5, repeat=1) -> dict:
+    def _rpc(self, method, endpoint, json_data=None, timeout=5, repeat=4) -> dict:
         headers = {}
         if self.token:
             headers['Authorization'] = f'Bearer {self.token}'
@@ -60,7 +72,11 @@ class JoinMarketClientServer:
 
             if response.status_code == 401:
                 self.unlock_wallet()
+                headers['Authorization'] = f'Bearer {self.token}'
                 continue
+
+            if response.status_code == 409:
+                raise JoinmarketConflictException(f"Error {response.status_code}: {response.text}", response)
 
             if response.status_code >= 400:
                 try:
@@ -140,7 +156,7 @@ class JoinMarketClientServer:
         response = self.display_wallet()
         try:
             available_balance = response['walletinfo']['available_balance']
-            return available_balance
+            return int(float(available_balance) * BTC)
         except KeyError as e:
             raise Exception(f"Could not retrieve available balance: {e}")
 
@@ -156,7 +172,7 @@ class JoinMarketClientServer:
         method = "GET"
         endpoint = f"/wallet/{self.walletname}/address/new/{mixdepth}"
         response = self._rpc(method, endpoint)
-        return response
+        return response['address']
 
     def get_new_timelock_address(self, lockdate):
         """Get a fresh timelock address for depositing funds to create a fidelity bond."""
@@ -197,7 +213,13 @@ class JoinMarketClientServer:
             "ordertype": ordertype,
             "minsize": str(minsize)
         }
-        response = self._rpc(method, endpoint, json_data=json_data)
+
+        try:
+            response = self._rpc(method, endpoint, json_data=json_data)
+        except JoinmarketConflictException as e:
+            print("Could not start maker without confirmed balance")
+            response = e.response
+
         return response
 
     def stop_maker(self):
@@ -271,6 +293,17 @@ class JoinMarketClientServer:
         endpoint = f"/wallet/{self.walletname}/taker/stop"
         response = self._rpc(method, endpoint)
         return response
+
+    def send(self, addressed_fundings):
+        try:
+            for address, amount in addressed_fundings:
+                self.simple_send(destination_address=address, amount_sats=amount)
+                print(f"- sent {amount} sats to {address}")
+                sleep(5)  # The btc node needs time to process the transaction
+        except Exception as e:
+            print(f"- error during fund distribution: {e}")
+            raise e
+
 
     def simple_send(self, destination_address, amount_sats, mixdepth=0, txfee=5000):
         """
