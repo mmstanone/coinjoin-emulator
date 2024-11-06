@@ -129,6 +129,13 @@ class JoinmarketEngine(EngineBase):
         print(f"- started {client.name} (wait took {time() - start} seconds)")
         return client
 
+    def stop_client(self, idx: int):
+        name = f"jcs-{idx:03}"
+        self.driver.stop(name)
+
+    def store_engine_logs(self, data_path):
+        # TODO: store irc logs.
+        pass
 
     def update_coinjoins_joinmarket(self):
         for client in self.clients:

@@ -103,6 +103,9 @@ class EngineBase:
     def start_client(self, idx: int, wallet=None):
         raise NotImplementedError
 
+    def stop_client(self, idx: int):
+        raise NotImplementedError
+
     def start_clients(self, wallets):
         print("Starting clients")
         with multiprocessing.pool.ThreadPool() as pool:
@@ -123,7 +126,7 @@ class EngineBase:
                     break
                 print(f"- failed to start {len(restart_idx)} clients; retrying ...")
                 for idx in restart_idx:
-                    self.driver.stop(f"wasabi-client-{idx:03}")
+                    self.stop_client(idx)
                 sleep(60)
                 restarted_clients = pool.starmap(
                     self.start_client,
@@ -195,16 +198,8 @@ class EngineBase:
             stored_blocks += 1
         print(f"- stored {stored_blocks} blocks")
 
-        try:
-            self.driver.download(
-                "wasabi-backend",
-                "/home/wasabi/.walletwasabi/backend/",
-                os.path.join(data_path, "wasabi-backend"),
-            )
+        self.store_engine_logs(data_path)
 
-            print(f"- stored backend logs")
-        except:
-            print(f"- could not store backend logs")
 
         # TODO parallelize (driver cannot be simply passed to new threads)
         for client in self.clients:
@@ -212,6 +207,9 @@ class EngineBase:
 
         shutil.make_archive(experiment_path, "zip", *os.path.split(experiment_path))
         print("- zip archive created")
+
+    def store_engine_logs(self, data_path):
+        raise NotImplementedError
 
     def stop_coinjoins(self):
         print("Stopping coinjoins")
