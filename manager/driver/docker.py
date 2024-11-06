@@ -37,8 +37,6 @@ class DockerDriver(Driver):
         skip_ip=False,
         cpu=0.1,
         memory=768,
-        volumes=None,
-        cap_add=None,
     ):
         self.client.containers.run(
             image,
@@ -49,8 +47,6 @@ class DockerDriver(Driver):
             network=self.network.id,
             ports=ports or {},
             environment=env or {},
-            volumes=volumes or {},
-            cap_add=cap_add or [],
         )
         return "", ports
 
