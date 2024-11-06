@@ -53,7 +53,7 @@ class JoinMarketClientServer:
         headers = {}
         if self.token:
             headers['Authorization'] = f'Bearer {self.token}'
-
+        response = None
         for _ in range(repeat):
             try:
                 response = requests.request(
@@ -87,6 +87,10 @@ class JoinMarketClientServer:
                 raise Exception(f"Error {response.status_code}: {error_message}")
 
             return response.json()
+
+        if response is not None:
+            return response.json()
+
         raise Exception("timeout")
 
     def get_status(self):
@@ -226,6 +230,7 @@ class JoinMarketClientServer:
         """Stop the yield generator service."""
         method = "GET"
         endpoint = f"/wallet/{self.walletname}/maker/stop"
+        # When stopping not running maker, returns 401 response
         response = self._rpc(method, endpoint)
         return response
 
@@ -283,14 +288,18 @@ class JoinMarketClientServer:
 
     def stop_coinjoin(self):
         """Stop a running coinjoin attempt."""
-        if self.type == "taker":
+        if self.type == "taker" and self.coinjoin_in_process:
             return self.stop_taker()
-        else:
+        elif self.type == "maker" and self.maker_running:
             return self.stop_maker()
+        else:
+            print("No coinjoin in process")
+            return True
 
     def stop_taker(self):
         method = "GET"
         endpoint = f"/wallet/{self.walletname}/taker/stop"
+        # When stopping not running taker, returns 401 response
         response = self._rpc(method, endpoint)
         return response
 
