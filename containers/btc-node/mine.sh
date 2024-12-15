@@ -17,6 +17,6 @@ fi
 while true
 do
     sleep $(($RANDOM % 60 + 30))
-    ADDR=$(curl -s -u user:password --data-binary '{"jsonrpc": "2.0", "method": "getnewaddress", "params": ["wallet"]}' -H 'content-type: text/plain;' http://localhost:18443 | jq -r '.result')
-    curl -s -u user:password --data-binary "{\"jsonrpc\": \"2.0\", \"method\": \"generatetoaddress\", \"params\": [1, \"$ADDR\"]}" -H 'content-type: text/plain;' http://localhost:18443 > /dev/null
+    ADDR=$(curl -s -u user:password --data-binary '{"jsonrpc": "2.0", "method": "getnewaddress", "params": ["wallet"]}' -H 'content-type: text/plain;' http://localhost:18443/wallet/wallet | jq -r '.result')
+    curl -s -u user:password --data-binary "{\"jsonrpc\": \"2.0\", \"method\": \"generatetoaddress\", \"params\": [1, \"$ADDR\"]}" -H 'content-type: text/plain;' http://localhost:18443> /dev/null
 done

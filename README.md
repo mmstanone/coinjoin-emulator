@@ -65,6 +65,10 @@ The fields are as follows:
   - `anon_score_target` is the target anon score of the wallet.
   - `redcoin_isolation` is a boolean value indicating whether the wallet should use redcoin isolation.
 
+## Engine
+You can run the simulation with different CoinJoin protocols. Currently, Wasabi and Joinmarket are supported. 
+The default protocol is Wasabi. To run the simulation with Joinmarket, use the `--engine joinmarket` option.  
+
 
 ## Advanced usage
 
