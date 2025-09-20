@@ -1,5 +1,7 @@
 import os
+from dataclasses import asdict
 
+from manager.commands.genscen import Scenario, WalletConfig
 from manager.engine.engine_base import EngineBase
 from manager.wasabi_backend import WasabiBackend
 from manager.wasabi_clients import WasabiClient
@@ -11,20 +13,21 @@ import tempfile
 import multiprocessing
 import multiprocessing.pool
 
-SCENARIO = {
-    "name": "default",
-    "rounds": 10,  # the number of coinjoins after which the simulation stops (0 for no limit)
-    "blocks": 0,  # the number of mined blocks after which the simulation stops (0 for no limit)
-    "default_version": "2.0.4",
-    "wallets": [
-        {"funds": [200000, 50000], "anon_score_target": 7},
-        {"funds": [3000000], "redcoin_isolation": True},
-        {"funds": [1000000, 500000], "skip_rounds": [0, 1, 2]},
-        {"funds": [3000000, 15000]},
-        {"funds": [1000000, 500000]},
-        {"funds": [3000000, 600000]},
+SCENARIO = Scenario(
+    name="default",
+    rounds=10,
+    blocks=0,
+    default_version="2.0.4",
+    wallets=[
+        WalletConfig(funds=[200000, 50000], anon_score_target=7),
+        WalletConfig(funds=[3000000], redcoin_isolation=True),
+        WalletConfig(funds=[1000000, 500000], skip_rounds=[0, 1, 2]),
+        WalletConfig(funds=[3000000, 15000]),
+        WalletConfig(funds=[1000000, 500000]),
+        WalletConfig(funds=[3000000, 600000]),
     ],
-}
+)
+
 
 class WasabiEngine(EngineBase):
     def __init__(self, args, driver):
@@ -42,15 +45,12 @@ class WasabiEngine(EngineBase):
 
     def prepare_client_images(self):
         for version in self.versions:
-            major_version = version[0]
             name = f"wasabi-client:{version}"
-            path = f"./containers/wasabi-clients/v{major_version}/{version}"
-            self.prepare_image(name, path) 
-
+            path = f"./containers/wasabi-clients/{version}"
+            self.prepare_image(name, path)
 
     def start_engine_infrastructure(self):
         self.start_wasabi_backend()
-
 
     def start_wasabi_backend(self):
         wasabi_backend_ip, wasabi_backend_ports = self.driver.run(
@@ -67,7 +67,7 @@ class WasabiEngine(EngineBase):
         sleep(1)
         with open("./containers/wasabi-backend/WabiSabiConfig.json", "r") as config_file:
             backend_config = json.load(config_file)
-        backend_config.update(SCENARIO.get("backend", {}))
+        backend_config.update(asdict(SCENARIO.backend))
 
         with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
             scenario_file = tmp_file.name
@@ -88,11 +88,8 @@ class WasabiEngine(EngineBase):
         self.coordinator.wait_ready()
         print("- started wasabi-backend")
 
-
     def start_distributor(self):
-        distributor_version = self.scenario.get(
-            "distributor_version", self.scenario["default_version"]
-        )
+        distributor_version = self.scenario.distributor_version or self.scenario.default_version
         wasabi_client_distributor_ip, wasabi_client_distributor_ports = self.driver.run(
             "wasabi-client-distributor",
             f"{self.args.image_prefix}wasabi-client:{distributor_version}",
@@ -129,25 +126,17 @@ class WasabiEngine(EngineBase):
             stop=stop,
         )
 
-    def start_client(self, idx, wallet):
-        version = wallet.get("version", self.scenario["default_version"])
+    def start_client(self, idx: int, wallet: WalletConfig):
+        version = wallet.version or self.scenario.default_version
 
-        if "anon_score_target" in wallet:
-            anon_score_target = wallet["anon_score_target"]
-        else:
-            anon_score_target = self.scenario.get("default_anon_score_target", None)
-
+        anon_score_target = wallet.anon_score_target or self.scenario.default_anon_score_target
         if anon_score_target is not None and version < "2.0.3":
             anon_score_target = None
             print(
                 f"Anon Score Target is ignored for wallet {idx} as it is curently supported only for version 2.0.3 and newer"
             )
 
-        if "redcoin_isolation" in wallet:
-            redcoin_isolation = wallet["redcoin_isolation"]
-        else:
-            redcoin_isolation = self.scenario.get("default_redcoin_isolation", None)
-
+        redcoin_isolation = wallet.redcoin_isolation or self.scenario.default_redcoin_isolation
         if redcoin_isolation is not None and version < "2.0.3":
             redcoin_isolation = None
             print(
@@ -162,14 +151,9 @@ class WasabiEngine(EngineBase):
                 f"{self.args.image_prefix}wasabi-client:{version}",
                 env={
                     "ADDR_BTC_NODE": self.args.btc_node_ip or self.node.internal_ip,
-                    "ADDR_WASABI_BACKEND": self.args.wasabi_backend_ip
-                                           or self.coordinator.internal_ip,
-                    "WASABI_ANON_SCORE_TARGET": (
-                        str(anon_score_target) if anon_score_target else None
-                    ),
-                    "WASABI_REDCOIN_ISOLATION": (
-                        str(redcoin_isolation) if redcoin_isolation else None
-                    ),
+                    "ADDR_WASABI_BACKEND": self.args.wasabi_backend_ip or self.coordinator.internal_ip,
+                    "WASABI_ANON_SCORE_TARGET": (str(anon_score_target) if anon_score_target else None),
+                    "WASABI_REDCOIN_ISOLATION": (str(redcoin_isolation) if redcoin_isolation else None),
                 },
                 ports={37128: 37129 + idx},
                 cpu=(0.3 if version < "2.0.4" else 0.1),
@@ -179,8 +163,8 @@ class WasabiEngine(EngineBase):
             print(f"- could not start {name} ({e})")
             return None
 
-        delay = (wallet.get("delay_blocks", 0), wallet.get("delay_rounds", 0))
-        stop = (wallet.get("stop_blocks", 0), wallet.get("stop_rounds", 0))
+        delay = (wallet.delay_blocks, wallet.delay_rounds)
+        stop = (wallet.stop_blocks, wallet.stop_rounds)
         client = self.init_wasabi_client(
             version,
             ip if self.args.proxy else self.args.control_ip,
@@ -192,9 +176,7 @@ class WasabiEngine(EngineBase):
 
         start = time()
         if not client.wait_wallet(timeout=60):
-            print(
-                f"- could not start {name} (application timeout {time() - start} seconds)"
-            )
+            print(f"- could not start {name} (application timeout {time() - start} seconds)")
             return None
         print(f"- started {client.name} (wait took {time() - start} seconds)")
         return client
@@ -250,8 +232,10 @@ class WasabiEngine(EngineBase):
     def run_engine(self):
         print("Running simulation")
         initial_block = self.node.get_block_count()
-        while (self.scenario["rounds"] == 0 or self.current_round < self.scenario["rounds"]) and (
-                self.scenario["blocks"] == 0 or self.current_block < self.scenario["blocks"]
+        while (
+            self.scenario.rounds == 0
+            or self.current_round < self.scenario.rounds
+            and (self.scenario.blocks == 0 or self.current_block < self.scenario.blocks)
         ):
             for _ in range(3):
                 try:
@@ -279,7 +263,6 @@ class WasabiEngine(EngineBase):
             self.update_coinjoins()
             print(
                 f"- coinjoin rounds: {self.current_round} (block {self.current_block})".ljust(60),
-                end="\r",
             )
             sleep(1)
         print()

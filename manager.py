@@ -3,11 +3,13 @@ from manager.engine.wasabi_engine import WasabiEngine
 import manager.commands.genscen
 import sys
 import argparse
+from traceback import print_exception
 
 
 args = None
 engine = None
 versions = set()
+
 
 def run():
     try:
@@ -17,11 +19,13 @@ def run():
         print("KeyboardInterrupt received")
     except Exception as e:
         print(f"Terminating exception: {e}", file=sys.stderr)
+        print_exception(e)
     finally:
         engine.stop_coinjoins()
         if not args.no_logs:
             engine.store_logs()
         driver.cleanup(args.image_prefix)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run coinjoin simulation setup")
@@ -42,68 +46,40 @@ if __name__ == "__main__":
     parser.add_argument("--no-logs", action="store_true", default=False)
 
     console_subparser = subparsers.add_parser("console", help="run console")
-    console_subparser.add_argument(
-        "--force-rebuild", action="store_true", help="force rebuild of images"
-    )
+    console_subparser.add_argument("--force-rebuild", action="store_true", help="force rebuild of images")
     console_subparser.add_argument("--namespace", type=str, default="coinjoin")
-    console_subparser.add_argument(
-        "--image-prefix", type=str, default="", help="image prefix"
-    )
+    console_subparser.add_argument("--image-prefix", type=str, default="", help="image prefix")
     console_subparser.add_argument("--proxy", type=str, default="")
-    console_subparser.add_argument(
-        "--btc-node-ip", type=str, help="override btc-node ip", default=""
-    )
-    console_subparser.add_argument(
-        "--control-ip", type=str, help="control ip", default="localhost"
-    )
+    console_subparser.add_argument("--btc-node-ip", type=str, help="override btc-node ip", default="")
+    console_subparser.add_argument("--control-ip", type=str, help="control ip", default="localhost")
     console_subparser.add_argument("--reuse-namespace", action="store_true", default=False)
 
-
-
     build_subparser = subparsers.add_parser("build", help="build images")
-    build_subparser.add_argument(
-        "--force-rebuild", action="store_true", help="force rebuild of images"
-    )
+    build_subparser.add_argument("--force-rebuild", action="store_true", help="force rebuild of images")
     build_subparser.add_argument("--namespace", type=str, default="coinjoin")
-    build_subparser.add_argument(
-        "--image-prefix", type=str, default="", help="image prefix"
-    )
+    build_subparser.add_argument("--image-prefix", type=str, default="", help="image prefix")
 
     run_subparser = subparsers.add_parser("run", help="run simulation")
-    run_subparser.add_argument(
-        "--force-rebuild", action="store_true", help="force rebuild of images"
-    )
-    run_subparser.add_argument(
-        "--image-prefix", type=str, default="", help="image prefix"
-    )
-    run_subparser.add_argument(
-        "--scenario", type=str, help="scenario specification file"
-    )
-    run_subparser.add_argument(
-        "--btc-node-ip", type=str, help="override btc-node ip", default=""
-    )
+    run_subparser.add_argument("--force-rebuild", action="store_true", help="force rebuild of images")
+    run_subparser.add_argument("--image-prefix", type=str, default="", help="image prefix")
+    run_subparser.add_argument("--scenario", type=str, help="scenario specification file")
+    run_subparser.add_argument("--btc-node-ip", type=str, help="override btc-node ip", default="")
     run_subparser.add_argument(
         "--wasabi-backend-ip",
         type=str,
         help="override wasabi-backend ip",
         default="",
     )
-    run_subparser.add_argument(
-        "--control-ip", type=str, help="control ip", default="localhost"
-    )
+    run_subparser.add_argument("--control-ip", type=str, help="control ip", default="localhost")
     run_subparser.add_argument("--proxy", type=str, default="")
     run_subparser.add_argument("--namespace", type=str, default="coinjoin")
     run_subparser.add_argument("--reuse-namespace", action="store_true", default=False)
 
     clean_subparser = subparsers.add_parser("clean", help="clean up")
     clean_subparser.add_argument("--namespace", type=str, default="coinjoin")
-    clean_subparser.add_argument(
-        "--reuse-namespace", action="store_true", default=False
-    )
+    clean_subparser.add_argument("--reuse-namespace", action="store_true", default=False)
     clean_subparser.add_argument("--proxy", type=str, default="")
-    clean_subparser.add_argument(
-        "--image-prefix", type=str, default="", help="image prefix"
-    )
+    clean_subparser.add_argument("--image-prefix", type=str, default="", help="image prefix")
 
     genscen_subparser = subparsers.add_parser("genscen", help="generate scenario file")
     manager.commands.genscen.setup_parser(genscen_subparser)
@@ -153,3 +129,4 @@ if __name__ == "__main__":
         case _:
             print(f"Unknown command '{args.command}'")
             exit(1)
+
