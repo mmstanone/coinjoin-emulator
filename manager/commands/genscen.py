@@ -2,12 +2,13 @@ import argparse
 import json
 import os
 import sys
+from typing import Callable, Iterable
 import numpy.random
 import copy
 import random
 from dataclasses import dataclass, field
 import dataclasses
-from typing import List, Optional
+from enum import StrEnum, auto
 
 
 @dataclass
@@ -22,13 +23,19 @@ class BackendConfig:
     RoundExpiryTimeout: str = "0d 0h 10m 0s"
 
 
+class JoinmarketParticipantType(StrEnum):
+    maker = auto()
+    taker = auto()
+
+
 @dataclass
 class WalletConfig:
-    funds: List[int] = field(default_factory=list)
-    anon_score_target: Optional[int] = None
-    redcoin_isolation: Optional[bool] = None
-    skip_rounds: Optional[List[int]] = None
-    version: Optional[str] = None
+    funds: list[int] = field(default_factory=list)
+    anon_score_target: int | None = None
+    redcoin_isolation: bool | None = None
+    skip_rounds: list[int] | None = None
+    version: str | None = None
+    type: JoinmarketParticipantType | None = None
     delay_blocks: int = 0
     delay_rounds: int = 0
     stop_blocks: int = 0
@@ -41,17 +48,17 @@ class Scenario:
     rounds: int = 0
     blocks: int = 0
     backend: BackendConfig = field(default_factory=BackendConfig)
-    wallets: List[WalletConfig] = field(default_factory=list)
-    distributor_version: Optional[str] = None
+    wallets: list[WalletConfig] = field(default_factory=list)
+    distributor_version: str | None = None
     default_version: str = "2.0.4"
-    default_anon_score_target: Optional[int] = None
-    default_redcoin_isolation: Optional[bool] = None
+    default_anon_score_target: int | None = None
+    default_redcoin_isolation: bool | None = None
 
 
 SCENARIO_TEMPLATE = Scenario()
 
 
-def setup_parser(parser: argparse.ArgumentParser):
+def setup_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--name", type=str, help="scenario name")
     parser.add_argument("--client-count", type=int, default=10, help="number of wallets")
     parser.add_argument("--type", type=str, default="static", help="scenario type")
@@ -120,7 +127,7 @@ def setup_parser(parser: argparse.ArgumentParser):
     )
 
 
-def format_name(args):
+def format_name(args: argparse.Namespace) -> str:
     if args.name:
         return args.name
     if args.type == "static":
@@ -133,6 +140,8 @@ def format_name(args):
         return f"{args.distribution}-{args.type}-{args.client_count}"
     if args.type == "delayed-overmixing":
         return f"{args.distribution}-{args.type}-{args.client_count}"
+
+    return "default"
 
 
 def prepare_skip_rounds(args):
@@ -170,7 +179,7 @@ def prepare_skip_rounds(args):
             sys.exit(1)
 
 
-def prepare_distribution(distribution):
+def prepare_distribution(distribution: str) -> Callable[[float], Iterable[int]] | None:
     dist_name = distribution.split("[")[0]
     dist_params = None
     if "[" in distribution:
@@ -238,7 +247,7 @@ def prepare_wallet(args, idx, distribution, skip_rounds):
     return wallet
 
 
-def handler(args):
+def handler(args: argparse.Namespace):
     print("Generating scenario...")
     scenario = copy.deepcopy(SCENARIO_TEMPLATE)
     scenario.name = format_name(args)

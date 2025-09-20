@@ -104,13 +104,13 @@ class EngineBase:
     def init_client(self):
         raise NotImplementedError
 
-    def start_client(self, idx: int, wallet=None):
+    def start_client(self, idx: int, wallet: WalletConfig):
         raise NotImplementedError
 
     def stop_client(self, idx: int):
         raise NotImplementedError
 
-    def start_clients(self, wallets):
+    def start_clients(self, wallets: list[WalletConfig]):
         print("Starting clients")
         with multiprocessing.pool.ThreadPool() as pool:
             new_clients = pool.starmap(self.start_client, enumerate(wallets, start=len(self.clients)))
@@ -285,4 +285,3 @@ class EngineBase:
 
     def run_engine(self):
         raise NotImplementedError
-
