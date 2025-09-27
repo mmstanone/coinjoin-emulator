@@ -23,7 +23,7 @@ class DockerDriver(Driver):
             return False
 
     def build(self, name, path):
-        self.client.images.build(path=path, tag=name, rm=True, nocache=True)
+        self.client.images.build(path=os.path.abspath(path), tag=name, rm=True, nocache=True)
 
     def pull(self, name):
         self.client.images.pull(name)
