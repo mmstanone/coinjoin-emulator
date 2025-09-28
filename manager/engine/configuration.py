@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from enum import Enum
 from typing import Any
 import json
@@ -134,6 +134,10 @@ class ScenarioConfig:
             wasabi=wasabi_config,
             joinmarket=joinmarket_config
         )
+    
+    def to_dict(self) -> dict[str, Any]:
+        """Convert the scenario configuration to a dictionary for JSON serialization."""
+        return asdict(self)
 
 
 # Type aliases for convenience

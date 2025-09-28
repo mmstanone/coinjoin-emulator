@@ -1,5 +1,6 @@
 from manager.btc_node import BtcNode
 from manager import utils
+from manager.engine.configuration import ScenarioConfig, WalletConfig, FundConfig
 from time import sleep
 import random
 import os
@@ -20,29 +21,28 @@ class EngineBase:
         self.args = args
         self.driver = driver
         self.log_src_path = log_src_path
-        self.scenario = self.default_scenario()
+        self.scenario: ScenarioConfig = self.default_scenario()
         self.versions = set()
-        self.node: BtcNode = None
-        self.distributor = None
+        self.node: BtcNode | None = None
+        self.distributor = None  # type: ignore - Will be properly typed in subclasses
         self.clients = []
         self.invoices = {}
         self.current_block = 0
         self.current_round = 0
 
-    def default_scenario(self):
+    def default_scenario(self) -> ScenarioConfig:
         raise NotImplementedError
 
     def load_scenario(self):
         if self.args.command == "run" and self.args.scenario:
-            with open(self.args.scenario) as f:
-                self.scenario.update(json.load(f))
+            self.scenario = ScenarioConfig.from_json_config(self.args.scenario)
 
-        self.versions.add(self.scenario["default_version"])
-        if "distributor_version" in self.scenario:
-            self.versions.add(self.scenario["distributor_version"])
-        for wallet in self.scenario["wallets"]:
-            if "version" in wallet:
-                self.versions.add(wallet["version"])
+        self.versions.add(self.scenario.default_version)
+        if self.scenario.distributor_version is not None:
+            self.versions.add(self.scenario.distributor_version)
+        for wallet in self.scenario.wallets:
+            if wallet.version is not None:
+                self.versions.add(wallet.version)
 
 
     def prepare_images(self):
@@ -145,6 +145,11 @@ class EngineBase:
 
     def fund_distributor(self, btc_amount):
         print("Funding distributor")
+        if self.node is None:
+            raise RuntimeError("Bitcoin node is not initialized")
+        if self.distributor is None:
+            raise RuntimeError("Distributor is not initialized")
+            
         for _ in range(DISTRIBUTOR_UTXOS):
             self.node.fund_address(
                 self.distributor.get_new_address(),
@@ -179,18 +184,20 @@ class EngineBase:
     def store_logs(self):
         print("Storing logs")
         time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
-        experiment_path = f"./logs/{time}_{self.scenario['name']}"
+        experiment_path = f"./logs/{time}_{self.scenario.name}"
         data_path = os.path.join(experiment_path, "data")
         os.makedirs(data_path)
 
         with open(os.path.join(experiment_path, "scenario.json"), "w") as f:
-            json.dump(self.scenario, f, indent=2)
+            json.dump(self.scenario.to_dict(), f, indent=2)
             print("- stored scenario")
 
         stored_blocks = 0
         node_path = os.path.join(data_path, "btc-node")
         os.mkdir(node_path)
-        while stored_blocks < self.node.get_block_count():
+        if self.node is None:
+            raise RuntimeError("Bitcoin node is not initialized")
+        while stored_blocks < self.node.get_block_count():  # type: ignore
             block_hash = self.node.get_block_hash(stored_blocks)
             block = self.node.get_block_info(block_hash)
             with open(os.path.join(node_path, f"block_{stored_blocks}.json"), "w") as f:
@@ -226,10 +233,10 @@ class EngineBase:
         for i in due:
             self.pay_invoices(self.invoices.pop(i, []))
 
-    def prepare_invoices(self, wallets):
+    def prepare_invoices(self, wallets: list[WalletConfig]):
         print("Preparing invoices")
         client_invoices = [
-            (client, wallet.get("funds", [])) for client, wallet in zip(self.clients, wallets)
+            (client, wallet.funds) for client, wallet in zip(self.clients, wallets)
         ]
 
         for client, funds in client_invoices:
@@ -238,10 +245,10 @@ class EngineBase:
                 round = 0
                 if isinstance(fund, int):
                     value = fund
-                elif isinstance(fund, dict):
-                    value = fund.get("value", 0)
-                    block = fund.get("delay_blocks", 0)
-                    round = fund.get("delay_rounds", 0)
+                elif isinstance(fund, FundConfig):
+                    value = fund.value
+                    block = fund.delay_blocks or 0
+                    round = fund.delay_rounds or 0
                 addressed_invoice = (client.get_new_address(), value)
                 if (block, round) not in self.invoices:
                     self.invoices[(block, round)] = [addressed_invoice]
@@ -262,6 +269,8 @@ class EngineBase:
             for batch in utils.batched(addressed_invoices, BATCH_SIZE):
                 for _ in range(3):
                     try:
+                        if self.distributor is None:
+                            raise RuntimeError("Distributor is not initialized")
                         result = self.distributor.send(batch)
                         if str(result) == "timeout":
                             print("- transaction timeout")
@@ -282,12 +291,12 @@ class EngineBase:
             raise e
     
     def run(self):
-        print(f"=== Scenario {self.scenario['name']} ===")
+        print(f"=== Scenario {self.scenario.name} ===")
         self.prepare_images()
         self.start_infrastructure()
         self.fund_distributor(1000)
-        self.start_clients(self.scenario["wallets"])
-        self.prepare_invoices(self.scenario["wallets"])
+        self.start_clients(self.scenario.wallets)
+        self.prepare_invoices(self.scenario.wallets)
         print("Running simulation")
         self.run_engine()
 
