@@ -1,3 +1,4 @@
+from traceback import print_exception
 from manager.engine.joinmarket_engine import JoinmarketEngine
 from manager.engine.wasabi_engine import WasabiEngine
 import manager.commands.genscen
@@ -17,6 +18,7 @@ def run():
         print("KeyboardInterrupt received")
     except Exception as e:
         print(f"Terminating exception: {e}", file=sys.stderr)
+        print_exception(e)
     finally:
         engine.stop_coinjoins()
         if not args.no_logs:
