@@ -1,4 +1,7 @@
+import enum
 import os
+from dataclasses import dataclass
+from typing import Any
 
 from manager.engine.engine_base import EngineBase
 from manager.wasabi_backend import WasabiBackend
@@ -26,6 +29,7 @@ SCENARIO = {
     ],
 }
 
+
 class WasabiEngine(EngineBase):
     def __init__(self, args, driver):
         self.coordinator = None
@@ -45,12 +49,10 @@ class WasabiEngine(EngineBase):
             major_version = version[0]
             name = f"wasabi-client:{version}"
             path = f"./containers/wasabi-clients/v{major_version}/{version}"
-            self.prepare_image(name, path) 
-
+            self.prepare_image(name, path)
 
     def start_engine_infrastructure(self):
         self.start_wasabi_backend()
-
 
     def start_wasabi_backend(self):
         wasabi_backend_ip, wasabi_backend_ports = self.driver.run(
@@ -88,11 +90,8 @@ class WasabiEngine(EngineBase):
         self.coordinator.wait_ready()
         print("- started wasabi-backend")
 
-
     def start_distributor(self):
-        distributor_version = self.scenario.get(
-            "distributor_version", self.scenario["default_version"]
-        )
+        distributor_version = self.scenario.get("distributor_version", self.scenario["default_version"])
         wasabi_client_distributor_ip, wasabi_client_distributor_ports = self.driver.run(
             "wasabi-client-distributor",
             f"{self.args.image_prefix}wasabi-client:{distributor_version}",
@@ -162,14 +161,9 @@ class WasabiEngine(EngineBase):
                 f"{self.args.image_prefix}wasabi-client:{version}",
                 env={
                     "ADDR_BTC_NODE": self.args.btc_node_ip or self.node.internal_ip,
-                    "ADDR_WASABI_BACKEND": self.args.wasabi_backend_ip
-                                           or self.coordinator.internal_ip,
-                    "WASABI_ANON_SCORE_TARGET": (
-                        str(anon_score_target) if anon_score_target else None
-                    ),
-                    "WASABI_REDCOIN_ISOLATION": (
-                        str(redcoin_isolation) if redcoin_isolation else None
-                    ),
+                    "ADDR_WASABI_BACKEND": self.args.wasabi_backend_ip or self.coordinator.internal_ip,
+                    "WASABI_ANON_SCORE_TARGET": (str(anon_score_target) if anon_score_target else None),
+                    "WASABI_REDCOIN_ISOLATION": (str(redcoin_isolation) if redcoin_isolation else None),
                 },
                 ports={37128: 37129 + idx},
                 cpu=(0.3 if version < "2.0.4" else 0.1),
@@ -192,9 +186,7 @@ class WasabiEngine(EngineBase):
 
         start = time()
         if not client.wait_wallet(timeout=60):
-            print(
-                f"- could not start {name} (application timeout {time() - start} seconds)"
-            )
+            print(f"- could not start {name} (application timeout {time() - start} seconds)")
             return None
         print(f"- started {client.name} (wait took {time() - start} seconds)")
         return client
@@ -251,7 +243,7 @@ class WasabiEngine(EngineBase):
         print("Running simulation")
         initial_block = self.node.get_block_count()
         while (self.scenario["rounds"] == 0 or self.current_round < self.scenario["rounds"]) and (
-                self.scenario["blocks"] == 0 or self.current_block < self.scenario["blocks"]
+            self.scenario["blocks"] == 0 or self.current_block < self.scenario["blocks"]
         ):
             for _ in range(3):
                 try:
