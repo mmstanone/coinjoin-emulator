@@ -3,6 +3,8 @@ import os
 from manager.engine.engine_base import EngineBase
 from manager.engine.configuration import ScenarioConfig, WalletConfig, WasabiConfig
 from manager.wasabi_backend import WasabiBackend
+from manager.wasabi_backend_26 import WasabiBackend26
+from manager.wasabi_coordinator import WasabiCoordinator
 from manager.wasabi_clients import WasabiClient
 from time import sleep, time
 import sys
@@ -15,6 +17,7 @@ import multiprocessing.pool
 class WasabiEngine(EngineBase):
     def __init__(self, args, driver):
         self.coordinator = None
+        self.backend = None
         super().__init__(args, driver, "/home/wasabi/.walletwasabi/backend/")
 
     def default_scenario(self) -> ScenarioConfig:
@@ -42,21 +45,41 @@ class WasabiEngine(EngineBase):
             ],
         )
 
+    def uses_wasabi_26(self):
+        """Check if any clients use Wasabi 2.6.0 or later"""
+        versions_to_check = [self.scenario.default_version]
+        if self.scenario.distributor_version:
+            versions_to_check.append(self.scenario.distributor_version)
+        for wallet in self.scenario.wallets:
+            if wallet.version:
+                versions_to_check.append(wallet.version)
+        
+        return any(version >= "2.6.0" for version in versions_to_check)
+
     def prepare_images(self):
         print("Preparing images")
         self.prepare_image("btc-node")
         self.prepare_client_images()
-        self.prepare_image("wasabi-backend")
+        # Determine backend versions to prepare based on scenario
+        if self.uses_wasabi_26():
+            self.prepare_image("wasabi-backend-2.6")
+            self.prepare_image("wasabi-coordinator")
+        else:
+            self.prepare_image("wasabi-backend")
 
     def prepare_client_images(self):
         for version in self.versions:
             major_version = version[0]
             name = f"wasabi-client:{version}"
-            path = f"./containers/wasabi-clients/v{major_version}/{version}"
+            path = f"./containers/wasabi-clients/{version}"
             self.prepare_image(name, path)
 
     def start_engine_infrastructure(self):
-        self.start_wasabi_backend()
+        if self.uses_wasabi_26():
+            self.start_wasabi_backend_26()
+            self.start_wasabi_coordinator()
+        else:
+            self.start_wasabi_backend()
 
     def start_wasabi_backend(self):
         if self.node is None:
@@ -87,27 +110,97 @@ class WasabiEngine(EngineBase):
             "/home/wasabi/.walletwasabi/backend/WabiSabiConfig.json",
         )
 
-        self.coordinator = WasabiBackend(
+        self.backend = WasabiBackend(
             host=wasabi_backend_ip if self.args.proxy else self.args.control_ip,
             port=37127 if self.args.proxy else wasabi_backend_ports[37127],
             internal_ip=wasabi_backend_ip,
             proxy=self.args.proxy,
         )
-        self.coordinator.wait_ready()
+        self.backend.wait_ready()
         print("- started wasabi-backend")
+
+    def start_wasabi_backend_26(self):
+        if self.node is None:
+            raise RuntimeError("Bitcoin node is not initialized")
+        wasabi_backend_ip, wasabi_backend_ports = self.driver.run(
+            "wasabi-backend-2.6",
+            f"{self.args.image_prefix}wasabi-backend-2.6",
+            ports={37127: 37127},
+            env={
+                "WASABI_BIND": "http://0.0.0.0:37127",
+                "ADDR_BTC_NODE": self.args.btc_node_ip or self.node.internal_ip,
+            },
+            cpu=8.0,
+            memory=8192,
+        )
+        sleep(1)
+        with open("./containers/wasabi-backend-2.6/WabiSabiConfig.json", "r") as config_file:
+            backend_config = json.load(config_file)
+        backend_config.update(self.scenario.backend or {})
+
+        with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+            scenario_file = tmp_file.name
+            tmp_file.write(json.dumps(backend_config, indent=2).encode())
+
+        self.driver.upload(
+            "wasabi-backend-2.6",
+            scenario_file,
+            "/home/wasabi/.walletwasabi/backend/WabiSabiConfig.json",
+        )
+
+        self.backend = WasabiBackend26(
+            host=wasabi_backend_ip if self.args.proxy else self.args.control_ip,
+            port=37127 if self.args.proxy else wasabi_backend_ports[37127],
+            internal_ip=wasabi_backend_ip,
+            proxy=self.args.proxy,
+        )
+        self.backend.wait_ready()
+        print("- started wasabi-backend-2.6")
+
+    def start_wasabi_coordinator(self):
+        if self.node is None:
+            raise RuntimeError("Bitcoin node is not initialized")
+        wasabi_coordinator_ip, wasabi_coordinator_ports = self.driver.run(
+            "wasabi-coordinator",
+            f"{self.args.image_prefix}wasabi-coordinator",
+            ports={37117: 37117},
+            env={
+                "ADDR_BTC_NODE": self.args.btc_node_ip or self.node.internal_ip,
+            },
+            cpu=4.0,
+            memory=4096,
+        )
+        sleep(1)
+        
+        self.coordinator = WasabiCoordinator(
+            host=wasabi_coordinator_ip if self.args.proxy else self.args.control_ip,
+            port=37117 if self.args.proxy else wasabi_coordinator_ports[37117],
+            internal_ip=wasabi_coordinator_ip,
+            proxy=self.args.proxy,
+        )
+        self.coordinator.wait_ready()
+        print("- started wasabi-coordinator")
 
     def start_distributor(self):
         if self.node is None:
             raise RuntimeError("Bitcoin node is not initialized")
-        if self.coordinator is None:
-            raise RuntimeError("Wasabi backend coordinator is not initialized")
+        
+        # For 2.6+, check coordinator; for older versions, check backend (which acts as coordinator)
+        if self.uses_wasabi_26():
+            if self.coordinator is None:
+                raise RuntimeError("Wasabi coordinator is not initialized")
+            backend_address = self.coordinator.internal_ip
+        else:
+            if self.backend is None:
+                raise RuntimeError("Wasabi backend is not initialized")
+            backend_address = self.backend.internal_ip
         distributor_version = self.scenario.distributor_version or self.scenario.default_version
         wasabi_client_distributor_ip, wasabi_client_distributor_ports = self.driver.run(
             "wasabi-client-distributor",
             f"{self.args.image_prefix}wasabi-client:{distributor_version}",
             env={
                 "ADDR_BTC_NODE": self.args.btc_node_ip or self.node.internal_ip,
-                "ADDR_WASABI_BACKEND": self.args.wasabi_backend_ip or self.coordinator.internal_ip,
+                "ADDR_WASABI_BACKEND": self.args.wasabi_backend_ip or backend_address,
             },
             ports={37128: 37128},
             cpu=1.0,
@@ -160,8 +253,16 @@ class WasabiEngine(EngineBase):
 
         if self.node is None:
             raise RuntimeError("Bitcoin node is not initialized")
-        if self.coordinator is None:
-            raise RuntimeError("Wasabi backend coordinator is not initialized")
+        
+        # For 2.6+, check coordinator; for older versions, check backend (which acts as coordinator)
+        if self.uses_wasabi_26():
+            if self.coordinator is None:
+                raise RuntimeError("Wasabi coordinator is not initialized")
+            backend_address = self.coordinator.internal_ip
+        else:
+            if self.backend is None:
+                raise RuntimeError("Wasabi backend is not initialized")
+            backend_address = self.backend.internal_ip
         sleep(random.random() * 3)
         name = f"wasabi-client-{idx:03}"
         try:
@@ -170,7 +271,7 @@ class WasabiEngine(EngineBase):
                 f"{self.args.image_prefix}wasabi-client:{version}",
                 env={
                     "ADDR_BTC_NODE": self.args.btc_node_ip or self.node.internal_ip,
-                    "ADDR_WASABI_BACKEND": self.args.wasabi_backend_ip or self.coordinator.internal_ip,
+                    "ADDR_WASABI_BACKEND": self.args.wasabi_backend_ip or backend_address,
                     "WASABI_ANON_SCORE_TARGET": (str(anon_score_target) if anon_score_target else None),
                     "WASABI_REDCOIN_ISOLATION": (str(redcoin_isolation) if redcoin_isolation else None),
                 },
@@ -205,13 +306,32 @@ class WasabiEngine(EngineBase):
 
     def store_engine_logs(self, data_path):
         try:
-            self.driver.download(
-                "wasabi-backend",
-                "/home/wasabi/.walletwasabi/backend/",
-                os.path.join(data_path, "wasabi-backend"),
-            )
-
-            print(f"- stored backend logs")
+            if self.uses_wasabi_26():
+                # Store logs from both backend and coordinator
+                self.driver.download(
+                    "wasabi-backend-2.6",
+                    "/home/wasabi/.walletwasabi/backend/",
+                    os.path.join(data_path, "wasabi-backend-2.6"),
+                )
+                print(f"- stored backend-2.6 logs")
+                
+                try:
+                    self.driver.download(
+                        "wasabi-coordinator",
+                        "/home/wasabi/.walletwasabi/coordinator/",
+                        os.path.join(data_path, "wasabi-coordinator"),
+                    )
+                    print(f"- stored coordinator logs")
+                except:
+                    print(f"- could not store coordinator logs")
+            else:
+                # Store logs from legacy backend
+                self.driver.download(
+                    "wasabi-backend",
+                    "/home/wasabi/.walletwasabi/backend/",
+                    os.path.join(data_path, "wasabi-backend"),
+                )
+                print(f"- stored backend logs")
         except:
             print(f"- could not store backend logs")
 
@@ -258,13 +378,24 @@ class WasabiEngine(EngineBase):
         ):
             for _ in range(3):
                 try:
-                    self.current_round = sum(
-                        1
-                        for _ in self.driver.peek(
-                            "wasabi-backend",
-                            "/home/wasabi/.walletwasabi/backend/WabiSabi/CoinJoinIdStore.txt",
-                        ).split("\n")[:-1]
-                    )
+                    if self.uses_wasabi_26():
+                        # In 2.6, rounds are tracked by the coordinator
+                        self.current_round = sum(
+                            1
+                            for _ in self.driver.peek(
+                                "wasabi-coordinator",
+                                "/home/wasabi/.walletwasabi/coordinator/WabiSabi/CoinJoinIdStore.txt",
+                            ).split("\n")[:-1]
+                        )
+                    else:
+                        # In legacy versions, rounds are tracked by the backend
+                        self.current_round = sum(
+                            1
+                            for _ in self.driver.peek(
+                                "wasabi-backend",
+                                "/home/wasabi/.walletwasabi/backend/WabiSabi/CoinJoinIdStore.txt",
+                            ).split("\n")[:-1]
+                        )
                     break
                 except Exception as e:
                     print(f"- could not get rounds".ljust(60), end="\r")
