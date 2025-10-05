@@ -1,4 +1,5 @@
 import json
+from traceback import print_exception
 import requests
 from time import sleep
 
@@ -31,8 +32,9 @@ class WasabiBackend26:
         return None
 
     def _get_status(self):
+        # just to see whether the container is ready
         response = requests.get(
-            f"http://{self.host}:{self.port}/api/v4/btc/Blockchain/status",
+            f"http://{self.host}:{self.port}/api/software/versions",
             proxies=dict(http=self.proxy),
             timeout=5,
         )
@@ -43,6 +45,6 @@ class WasabiBackend26:
             try:
                 self._get_status()
                 break
-            except:
+            except Exception as e:
                 pass
-            sleep(0.1)
+            sleep(1)

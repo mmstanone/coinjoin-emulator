@@ -7,4 +7,4 @@ if [ -z "$ADDR_WASABI_BACKEND" ]; then
 fi
 mkdir -p /home/wasabi/.walletwasabi/client
 ( echo "cat <<EOF" ; cat /home/wasabi/Config.json ; echo EOF ) | sh > /home/wasabi/.walletwasabi/client/Config.json
-./WalletWasabi.Daemon
+WASABI_NETWORK=regtest ./WalletWasabi.Daemon --network=regtest

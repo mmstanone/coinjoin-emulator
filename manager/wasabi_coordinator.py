@@ -1,6 +1,7 @@
-import json
+from traceback import print_exception
 import requests
 from time import sleep
+
 
 class WasabiCoordinator:
     def __init__(self, host="localhost", port=37117, internal_ip="", proxy=""):
@@ -13,7 +14,7 @@ class WasabiCoordinator:
         """Get coordinator status"""
         try:
             response = requests.get(
-                f"http://{self.host}:{self.port}/api/v1/status",
+                f"http://{self.host}:{self.port}/wabisabi/human-monitor",
                 proxies=dict(http=self.proxy),
                 timeout=5,
             )
@@ -24,13 +25,16 @@ class WasabiCoordinator:
     def _get_rounds(self):
         """Get active coinjoin rounds"""
         try:
+            print(self.host, self.port, self.proxy)
             response = requests.get(
-                f"http://{self.host}:{self.port}/api/v1/rounds",
+                f"http://{self.host}:{self.port}/wabisabi/human-monitor",
                 proxies=dict(http=self.proxy),
                 timeout=5,
             )
+            print(response.json())
             return response.json()
-        except Exception:
+        except Exception as e:
+            print_exception(e)
             return None
 
     def wait_ready(self):

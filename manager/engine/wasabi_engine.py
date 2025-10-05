@@ -1,4 +1,5 @@
 import os
+from traceback import print_exception
 
 from manager.engine.engine_base import EngineBase
 from manager.engine.configuration import ScenarioConfig, WalletConfig, WasabiConfig
@@ -14,6 +15,7 @@ import tempfile
 import multiprocessing
 import multiprocessing.pool
 
+
 class WasabiEngine(EngineBase):
     def __init__(self, args, driver):
         self.coordinator = None
@@ -25,20 +27,11 @@ class WasabiEngine(EngineBase):
             name="default",
             rounds=10,  # the number of coinjoins after which the simulation stops (0 for no limit)
             blocks=0,  # the number of mined blocks after which the simulation stops (0 for no limit)
-            default_version="2.0.4",
+            default_version="2.6.0",
             wallets=[
-                WalletConfig(
-                    funds=[200000, 50000],
-                    wasabi=WasabiConfig(anon_score_target=7)
-                ),
-                WalletConfig(
-                    funds=[3000000],
-                    wasabi=WasabiConfig(redcoin_isolation=True)
-                ),
-                WalletConfig(
-                    funds=[1000000, 500000],
-                    wasabi=WasabiConfig(skip_rounds=[0, 1, 2])
-                ),
+                WalletConfig(funds=[200000, 50000], wasabi=WasabiConfig(anon_score_target=7)),
+                WalletConfig(funds=[3000000], wasabi=WasabiConfig(redcoin_isolation=True)),
+                WalletConfig(funds=[1000000, 500000], wasabi=WasabiConfig(skip_rounds=[0, 1, 2])),
                 WalletConfig(funds=[3000000, 15000]),
                 WalletConfig(funds=[1000000, 500000]),
                 WalletConfig(funds=[3000000, 600000]),
@@ -53,7 +46,7 @@ class WasabiEngine(EngineBase):
         for wallet in self.scenario.wallets:
             if wallet.version:
                 versions_to_check.append(wallet.version)
-        
+
         return any(version >= "2.6.0" for version in versions_to_check)
 
     def prepare_images(self):
@@ -141,12 +134,15 @@ class WasabiEngine(EngineBase):
         with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
             scenario_file = tmp_file.name
             tmp_file.write(json.dumps(backend_config, indent=2).encode())
-
-        self.driver.upload(
-            "wasabi-backend-2.6",
-            scenario_file,
-            "/home/wasabi/.walletwasabi/backend/WabiSabiConfig.json",
-        )
+        try:
+            self.driver.upload(
+                "wasabi-backend-2.6",
+                scenario_file,
+                "/home/wasabi/.walletwasabi/backend/WabiSabiConfig.json",
+            )
+        except Exception as e:
+            print_exception(e)
+            raise
 
         self.backend = WasabiBackend26(
             host=wasabi_backend_ip if self.args.proxy else self.args.control_ip,
@@ -154,6 +150,7 @@ class WasabiEngine(EngineBase):
             internal_ip=wasabi_backend_ip,
             proxy=self.args.proxy,
         )
+        print("waiting ready...")
         self.backend.wait_ready()
         print("- started wasabi-backend-2.6")
 
@@ -166,25 +163,28 @@ class WasabiEngine(EngineBase):
             ports={37117: 37117},
             env={
                 "ADDR_BTC_NODE": self.args.btc_node_ip or self.node.internal_ip,
+                "WASABI_BIND": "http://0.0.0.0:37117",
             },
             cpu=4.0,
             memory=4096,
         )
         sleep(1)
-        
+        print("Something started...")
+
         self.coordinator = WasabiCoordinator(
             host=wasabi_coordinator_ip if self.args.proxy else self.args.control_ip,
             port=37117 if self.args.proxy else wasabi_coordinator_ports[37117],
             internal_ip=wasabi_coordinator_ip,
             proxy=self.args.proxy,
         )
+        print("waiting ready")
         self.coordinator.wait_ready()
         print("- started wasabi-coordinator")
 
     def start_distributor(self):
         if self.node is None:
             raise RuntimeError("Bitcoin node is not initialized")
-        
+
         # For 2.6+, check coordinator; for older versions, check backend (which acts as coordinator)
         if self.uses_wasabi_26():
             if self.coordinator is None:
@@ -206,6 +206,7 @@ class WasabiEngine(EngineBase):
             cpu=1.0,
             memory=2048,
         )
+        print(wasabi_client_distributor_ip, wasabi_client_distributor_ports)
 
         self.distributor = self.init_wasabi_client(
             distributor_version,
@@ -215,7 +216,7 @@ class WasabiEngine(EngineBase):
             delay=(0, 0),
             stop=(0, 0),
         )
-        if not self.distributor.wait_wallet(timeout=60):
+        if not self.distributor.wait_wallet(timeout=360):
             print(f"- could not start distributor (application timeout)")
             raise Exception("Could not start distributor")
         print("- started distributor")
@@ -236,8 +237,12 @@ class WasabiEngine(EngineBase):
 
         # Get Wasabi-specific settings
         wasabi_config = wallet.wasabi
-        anon_score_target = wasabi_config.anon_score_target if wasabi_config else self.scenario.default_anon_score_target
-        redcoin_isolation = wasabi_config.redcoin_isolation if wasabi_config else self.scenario.default_redcoin_isolation
+        anon_score_target = (
+            wasabi_config.anon_score_target if wasabi_config else self.scenario.default_anon_score_target
+        )
+        redcoin_isolation = (
+            wasabi_config.redcoin_isolation if wasabi_config else self.scenario.default_redcoin_isolation
+        )
 
         if anon_score_target is not None and version < "2.0.3":
             anon_score_target = None
@@ -253,7 +258,7 @@ class WasabiEngine(EngineBase):
 
         if self.node is None:
             raise RuntimeError("Bitcoin node is not initialized")
-        
+
         # For 2.6+, check coordinator; for older versions, check backend (which acts as coordinator)
         if self.uses_wasabi_26():
             if self.coordinator is None:
@@ -314,7 +319,7 @@ class WasabiEngine(EngineBase):
                     os.path.join(data_path, "wasabi-backend-2.6"),
                 )
                 print(f"- stored backend-2.6 logs")
-                
+
                 try:
                     self.driver.download(
                         "wasabi-coordinator",
