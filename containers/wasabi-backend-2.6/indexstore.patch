@@ -1,0 +1,87 @@
+diff --git a/WalletWasabi/Blockchain/BlockFilters/IndexBuilderService.cs b/WalletWasabi/Blockchain/BlockFilters/IndexBuilderService.cs
+index 1111111..2222222 100644
+--- a/WalletWasabi/Blockchain/BlockFilters/IndexBuilderService.cs
++++ b/WalletWasabi/Blockchain/BlockFilters/IndexBuilderService.cs
+@@ -67,6 +67,15 @@
+ 	protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+ 	{
+ 		var lastFilter = await GetLastFilterAsync(stoppingToken).ConfigureAwait(false);
++		Logger.LogInfo("IndexBuilderService started execution loop.");
++		if (lastFilter is null)
++		{
++			Logger.LogInfo("No last filter found, starting from genesis or configured starting height.");
++		}
++		else
++		{
++			Logger.LogInfo($"Resuming from last filter: height={lastFilter.Header.Height}, blockHash={lastFilter.Header.BlockHash}.");
++		}
+ 
+ 		while (!stoppingToken.IsCancellationRequested)
+ 		{
+@@ -79,6 +88,11 @@
+ 				var blockchainInfo = await _rpcClient.GetBlockchainInfoAsync(stoppingToken).ConfigureAwait(false);
+ 
+ 				// If wasabi filter height is the same as core we may be done.
++				Logger.LogInfo($"Iteration info: currentHeight={currentHeight}, currentHash={currentHash}, " +
++					$"rpc.Blocks={blockchainInfo.Blocks}, rpc.Headers={blockchainInfo.Headers}, " +
++					$"IsSynced={blockchainInfo.IsSynchronized()}, InitialBlockDownload={blockchainInfo.InitialBlockDownload}");
++
++
+ 				if (blockchainInfo.Blocks == currentHeight)
+ 				{
+ 					var timeToWait = blockchainInfo.IsSynchronized() && !blockchainInfo.InitialBlockDownload
+@@ -89,6 +103,7 @@
+ 				}
+ 
+ 				var nextHeight = currentHeight + 1;
++				Logger.LogInfo($"Fetching block hash for nextHeight={nextHeight}");
+ 				var blockHash = await _rpcClient.GetBlockHashAsync((int)nextHeight, stoppingToken).ConfigureAwait(false);
+ 
+ 				var blockFilterResult = await _generatorBlockFilter(_rpcClient, blockHash, nextHeight, currentHash, stoppingToken).ConfigureAwait(false);
+@@ -98,6 +113,8 @@
+ 						using (await _indexLock.LockAsync(stoppingToken).ConfigureAwait(false))
+ 						{
+ 							_indexStorage.TryAppend(filterModel);
++							Logger.LogInfo($"Successfully appended filter: height={filterModel.Header.Height}, " +
++								$"blockHash={filterModel.Header.BlockHash}");
+ 						}
+ 
+ 						// If not close to the tip, just log debug.
+@@ -113,6 +130,7 @@
+ 						Logger.LogWarning(errorMessage);
+ 
+ 						await ReorgOneAsync(stoppingToken).ConfigureAwait(false);
++						Logger.LogInfo("Reorg detected, reloading last filter after rollback.");
+ 						lastFilter = await GetLastFilterAsync(stoppingToken).ConfigureAwait(false);
+ 						return lastFilter ?? throw new InvalidOperationException("There is no blocks in available!");
+ 					}).ConfigureAwait(false);
+@@ -123,7 +141,9 @@
+ 			}
+ 			catch (Exception ex)
+ 			{
+-				Logger.LogError(ex);
++				Logger.LogError($"Unexpected exception in IndexBuilderService loop: {ex}");
++
++				Logger.LogInfo($"Delaying for {_options.DelayInCaseOfError.TotalSeconds} seconds due to error.");
+ 
+ 				// Pause the while loop for a while to not flood logs in case of permanent error.
+ 				await Task.Delay(_options.DelayInCaseOfError, stoppingToken).ConfigureAwait(false);
+@@ -201,11 +221,13 @@
+ 	public static async Task<Result<FilterModel, string>> FetchBlockFilterAsync(IRPCClient rpcClient, uint256 blockHash, uint blockHeight, uint256 expectedHeader, CancellationToken cancellationToken)
+ 	{
+ 		var blockFilter = await rpcClient.GetBlockFilterAsync(blockHash, cancellationToken).ConfigureAwait(false);
++		Logger.LogInfo($"Fetched block filter for blockHash={blockHash} at height={blockHeight}.");
++		Logger.LogInfo($"Expected header: {expectedHeader}");
++		Logger.LogInfo($"Filter header: {blockFilter.Header}");
++
++		var computedHeader = blockFilter.Filter.GetHeader(expectedHeader);
++		Logger.LogInfo($"Computed header from expected header: {computedHeader}");
+ 
+-		if (expectedHeader != uint256.Zero && blockFilter.Filter.GetHeader(expectedHeader) != blockFilter.Header)
+-		{
+-			return Result<FilterModel, string>.Fail($"Reorg invalid block hash {blockHash} at {blockHeight}.");
+-		}
+ 		var smartHeader = new SmartHeader(blockHash, blockFilter.Header, blockHeight, DateTimeOffset.MinValue);
+ 		var filterModel = new FilterModel(smartHeader, blockFilter.Filter);
+ 		return filterModel;
+

@@ -20,6 +20,7 @@ class WasabiEngine(EngineBase):
     def __init__(self, args, driver):
         self.coordinator = None
         self.backend = None
+        self.round_ids = set()
         super().__init__(args, driver, "/home/wasabi/.walletwasabi/backend/")
 
     def default_scenario(self) -> ScenarioConfig:
@@ -32,7 +33,7 @@ class WasabiEngine(EngineBase):
                 WalletConfig(funds=[200000, 50000], wasabi=WasabiConfig(anon_score_target=7)),
                 WalletConfig(funds=[3000000], wasabi=WasabiConfig(redcoin_isolation=True)),
                 WalletConfig(funds=[1000000, 500000], wasabi=WasabiConfig(skip_rounds=[0, 1, 2])),
-                WalletConfig(funds=[3000000, 15000]),
+                WalletConfig(funds=[3000000, 150000]),
                 WalletConfig(funds=[1000000, 500000]),
                 WalletConfig(funds=[3000000, 600000]),
             ],
@@ -150,7 +151,6 @@ class WasabiEngine(EngineBase):
             internal_ip=wasabi_backend_ip,
             proxy=self.args.proxy,
         )
-        print("waiting ready...")
         self.backend.wait_ready()
         print("- started wasabi-backend-2.6")
 
@@ -160,24 +160,22 @@ class WasabiEngine(EngineBase):
         wasabi_coordinator_ip, wasabi_coordinator_ports = self.driver.run(
             "wasabi-coordinator",
             f"{self.args.image_prefix}wasabi-coordinator",
-            ports={37117: 37117},
+            ports={37128: 37128},
             env={
                 "ADDR_BTC_NODE": self.args.btc_node_ip or self.node.internal_ip,
-                "WASABI_BIND": "http://0.0.0.0:37117",
+                "WASABI_BIND": "http://0.0.0.0:37128",
             },
             cpu=4.0,
             memory=4096,
         )
         sleep(1)
-        print("Something started...")
 
         self.coordinator = WasabiCoordinator(
             host=wasabi_coordinator_ip if self.args.proxy else self.args.control_ip,
-            port=37117 if self.args.proxy else wasabi_coordinator_ports[37117],
+            port=37128 if self.args.proxy else wasabi_coordinator_ports[37128],
             internal_ip=wasabi_coordinator_ip,
             proxy=self.args.proxy,
         )
-        print("waiting ready")
         self.coordinator.wait_ready()
         print("- started wasabi-coordinator")
 
@@ -187,9 +185,9 @@ class WasabiEngine(EngineBase):
 
         # For 2.6+, check coordinator; for older versions, check backend (which acts as coordinator)
         if self.uses_wasabi_26():
-            if self.coordinator is None:
+            if self.coordinator is None or self.backend is None:
                 raise RuntimeError("Wasabi coordinator is not initialized")
-            backend_address = self.coordinator.internal_ip
+            backend_address = self.backend.internal_ip
         else:
             if self.backend is None:
                 raise RuntimeError("Wasabi backend is not initialized")
@@ -202,7 +200,7 @@ class WasabiEngine(EngineBase):
                 "ADDR_BTC_NODE": self.args.btc_node_ip or self.node.internal_ip,
                 "ADDR_WASABI_BACKEND": self.args.wasabi_backend_ip or backend_address,
             },
-            ports={37128: 37128},
+            ports={37128: 37131},
             cpu=1.0,
             memory=2048,
         )
@@ -280,7 +278,7 @@ class WasabiEngine(EngineBase):
                     "WASABI_ANON_SCORE_TARGET": (str(anon_score_target) if anon_score_target else None),
                     "WASABI_REDCOIN_ISOLATION": (str(redcoin_isolation) if redcoin_isolation else None),
                 },
-                ports={37128: 37129 + idx},
+                ports={37128: 37132 + idx},
                 cpu=(0.3 if version < "2.0.4" else 0.1),
                 memory=(1024 if version < "2.0.4" else 768),
             )
@@ -383,15 +381,14 @@ class WasabiEngine(EngineBase):
         ):
             for _ in range(3):
                 try:
-                    if self.uses_wasabi_26():
-                        # In 2.6, rounds are tracked by the coordinator
-                        self.current_round = sum(
-                            1
-                            for _ in self.driver.peek(
-                                "wasabi-coordinator",
-                                "/home/wasabi/.walletwasabi/coordinator/WabiSabi/CoinJoinIdStore.txt",
-                            ).split("\n")[:-1]
-                        )
+                    if self.uses_wasabi_26() and self.coordinator is not None:
+                        resp = self.coordinator._get_status()
+                        for round_state in resp["RoundStates"]:
+                            if round_state["Phase"] == "TransactionSigning":
+                                print(f"Round ids so far: {self.round_ids}")
+                                self.round_ids.add(round_state["RoundId"])
+                        self.current_round = len(self.round_ids)
+
                     else:
                         # In legacy versions, rounds are tracked by the backend
                         self.current_round = sum(

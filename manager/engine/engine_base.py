@@ -12,7 +12,7 @@ import shutil
 import datetime
 
 DISTRIBUTOR_UTXOS = 20
-BATCH_SIZE = 5
+BATCH_SIZE = 1
 BTC = 100_000_000
 
 
@@ -43,7 +43,6 @@ class EngineBase:
         for wallet in self.scenario.wallets:
             if wallet.version is not None:
                 self.versions.add(wallet.version)
-
 
     def prepare_images(self):
         raise NotImplementedError
@@ -137,11 +136,8 @@ class EngineBase:
                         new_clients[restart_idx[idx]] = client
             else:
                 new_clients = list(filter(lambda x: x is not None, new_clients))
-                print(
-                    f"- failed to start {len(wallets) - len(new_clients)} clients; continuing ..."
-                )
+                print(f"- failed to start {len(wallets) - len(new_clients)} clients; continuing ...")
         self.clients.extend(new_clients)
-
 
     def fund_distributor(self, btc_amount):
         print("Funding distributor")
@@ -149,7 +145,7 @@ class EngineBase:
             raise RuntimeError("Bitcoin node is not initialized")
         if self.distributor is None:
             raise RuntimeError("Distributor is not initialized")
-            
+
         for _ in range(DISTRIBUTOR_UTXOS):
             self.node.fund_address(
                 self.distributor.get_new_address(),
@@ -159,7 +155,6 @@ class EngineBase:
         while (balance := self.distributor.get_balance()) < btc_amount * BTC:
             sleep(1)
         print(f"- funded (current balance {balance / BTC:.8f} BTC)")
-
 
     def store_client_logs(self, client, data_path):
         sleep(random.random() * 3)
@@ -207,7 +202,6 @@ class EngineBase:
 
         self.store_engine_logs(data_path)
 
-
         # TODO parallelize (driver cannot be simply passed to new threads)
         for client in self.clients:
             self.store_client_logs(client, data_path)
@@ -225,19 +219,13 @@ class EngineBase:
             print(f"- stopped mixing {client.name}")
 
     def update_invoice_payments(self):
-        due = list(
-            filter(
-                lambda x: x[0] <= self.current_block and x[1] <= self.current_round, self.invoices.keys()
-            )
-        )
+        due = list(filter(lambda x: x[0] <= self.current_block and x[1] <= self.current_round, self.invoices.keys()))
         for i in due:
             self.pay_invoices(self.invoices.pop(i, []))
 
     def prepare_invoices(self, wallets: list[WalletConfig]):
         print("Preparing invoices")
-        client_invoices = [
-            (client, wallet.funds) for client, wallet in zip(self.clients, wallets)
-        ]
+        client_invoices = [(client, wallet.funds) for client, wallet in zip(self.clients, wallets)]
 
         for client, funds in client_invoices:
             for fund in funds:
@@ -259,7 +247,6 @@ class EngineBase:
             random.shuffle(addressed_invoices)
 
         print(f"- prepared {sum(map(len, self.invoices.values()))} invoices")
-
 
     def pay_invoices(self, addressed_invoices):
         print(
@@ -288,8 +275,9 @@ class EngineBase:
 
         except Exception as e:
             print("- invoice payment failed")
-            raise e
-    
+            pass
+            sleep(360)
+
     def run(self):
         print(f"=== Scenario {self.scenario.name} ===")
         self.prepare_images()
@@ -299,7 +287,6 @@ class EngineBase:
         self.prepare_invoices(self.scenario.wallets)
         print("Running simulation")
         self.run_engine()
-
 
     def run_engine(self):
         raise NotImplementedError

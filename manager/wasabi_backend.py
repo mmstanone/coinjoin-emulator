@@ -36,7 +36,6 @@ class WasabiBackend:
             proxies=dict(http=self.proxy),
             timeout=5,
         )
-        print(response.json())
         return response.json()
 
     def wait_ready(self):

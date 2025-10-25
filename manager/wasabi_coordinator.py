@@ -4,7 +4,7 @@ from time import sleep
 
 
 class WasabiCoordinator:
-    def __init__(self, host="localhost", port=37117, internal_ip="", proxy=""):
+    def __init__(self, host="localhost", port=37128, internal_ip="", proxy=""):
         self.host = host
         self.port = port
         self.internal_ip = internal_ip
@@ -31,7 +31,6 @@ class WasabiCoordinator:
                 proxies=dict(http=self.proxy),
                 timeout=5,
             )
-            print(response.json())
             return response.json()
         except Exception as e:
             print_exception(e)

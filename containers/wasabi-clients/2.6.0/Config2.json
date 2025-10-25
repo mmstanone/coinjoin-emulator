@@ -1,0 +1,57 @@
+#!/bin/bash
+if [ -z "$ADDR_BTC_NODE" ]; then
+    export ADDR_BTC_NODE="btc-node"
+fi
+if [ -z "$ADDR_WASABI_BACKEND" ]; then
+    export ADDR_WASABI_BACKEND="wasabi-backend-2.6"
+fi
+if [ -z "$ADDR_WASABI_COORDINATOR" ]; then
+    export ADDR_WASABI_COORDINATOR="wasabi-coordinator"
+fi
+
+rm -rf /home/wasabi/.walletwasabi
+# mkdir -p /home/wasabi/.walletwasabi/client
+# ( echo "cat <<EOF" ; cat /home/wasabi/Config.json ; echo EOF ) | sh > /home/wasabi/.walletwasabi/client/Config.json
+
+printf '\n\n\nStarting WalletWasabi Daemon to generate initial Config.json...\n\n'
+timeout 10 dotnet run 
+
+printf "Waiting for daemon to shut down...\n\n"
+sleep 1
+cp /home/wasabi/Config2.json /home/wasabi/.walletwasabi/client/Config.json
+
+printf '\n\n\nStarting WalletWasabi Daemon to apply new Config.json settings...\n\n'
+
+dotnet run --loglevel=trace  {
+  "Network": "RegTest",
+  "MainNetIndexerUri": "https://api.wasabiwallet.io/",
+  "TestNetIndexerUri": "https://api.wasabiwallet.co/", 
+  "RegTestIndexerUri": "http://wasabi-backend-2.6:37127/",
+  "MainNetCoordinatorUri": "https://api.wasabiwallet.io/",
+  "TestNetCoordinatorUri": "https://api.wasabiwallet.co/",
+  "RegTestCoordinatorUri": "http://wasabi-coordinator:37128/",
+  "UseTor": "Disabled",
+  "TerminateTorOnExit": true,
+  "TorBridges": [],
+  "DownloadNewVersion": false,
+  "UseBitcoinRpc": true,
+  "MainNetBitcoinRpcCredentialString": "",
+  "TestNetBitcoinRpcCredentialString": "",
+  "RegTestBitcoinRpcCredentialString": "user:password",
+  "MainNetBitcoinRpcEndPoint": "127.0.0.1:8332",
+  "TestNetBitcoinRpcEndPoint": "127.0.0.1:48332",
+  "RegTestBitcoinRpcEndPoint": "btc-node:18443",
+  "JsonRpcServerEnabled": true,
+  "JsonRpcUser": "",
+  "JsonRpcPassword": "",
+  "JsonRpcServerPrefixes": ["http://0.0.0.0:37128/"],
+  "DustThreshold": "0.00005",
+  "EnableGpu": true,
+  "CoordinatorIdentifier": "CoinJoinCoordinatorIdentifier",
+  "ExchangeRateProvider": "MempoolSpace",
+  "FeeRateEstimationProvider": "MempoolSpace",
+  "ExternalTransactionBroadcaster": "MempoolSpace",
+  "MaxCoinJoinMiningFeeRate": 150.0,
+  "AbsoluteMinInputCount": 2,
+  "ConfigVersion": 2
+}

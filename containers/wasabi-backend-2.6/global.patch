@@ -1,0 +1,24 @@
+diff --git a/WalletWasabi.Daemon/Global.cs b/WalletWasabi.Daemon/Global.cs
+index 1111111..2222222 100644
+--- a/WalletWasabi.Daemon/Global.cs	2025-10-17 22:18:31.416851631 +0200
++++ b/WalletWasabi.Daemon/Global.cs	2025-10-17 22:19:28.180380126 +0200
+@@ -388,11 +388,13 @@
+ 		{
+ 			broadcasters.Add(new RpcBroadcaster(BitcoinRpcClient));
+ 		}
+-
+-		broadcasters.AddRange([
+-			new NetworkBroadcaster(BitcoinStore.MempoolService, p2p.Nodes),
+-			new ExternalTransactionBroadcaster(Config.ExternalTransactionBroadcaster, Network, ExternalSourcesHttpClientFactory),
+-		]);
++		if (Network != Network.RegTest)
++		{
++			broadcasters.AddRange([
++				new NetworkBroadcaster(BitcoinStore.MempoolService, p2p.Nodes),
++				new ExternalTransactionBroadcaster(Config.ExternalTransactionBroadcaster, Network, ExternalSourcesHttpClientFactory),
++			]);
++		}
+ 
+ 		return broadcasters;
+ 	}
+

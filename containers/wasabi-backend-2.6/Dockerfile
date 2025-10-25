@@ -10,6 +10,12 @@ RUN git checkout v2.6.0
 COPY logger.patch /wasabi-src/logger.patch
 RUN patch --binary -p1 < logger.patch
 
+# COPY indexstore.patch /wasabi-src/indexstore.patch
+# RUN patch -p1 < indexstore.patch
+
+# COPY global.patch /wasabi-src/global.patch
+# RUN patch -p1 < global.patch
+
 WORKDIR /wasabi-src/WalletWasabi.Backend
 RUN dotnet build -c Release
 

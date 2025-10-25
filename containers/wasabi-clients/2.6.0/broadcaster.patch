@@ -1,0 +1,13 @@
+diff --git a/WalletWasabi/Blockchain/TransactionBroadcasting/TransactionBroadcaster.cs b/WalletWasabi/Blockchain/TransactionBroadcasting/TransactionBroadcaster.cs
+index 1111111..2222222 100644
+--- a/WalletWasabi/Blockchain/TransactionBroadcasting/TransactionBroadcaster.cs	2025-10-18 19:56:58.071437845 +0200
++++ b/WalletWasabi/Blockchain/TransactionBroadcasting/TransactionBroadcaster.cs	2025-10-18 19:57:02.807462408 +0200
+@@ -146,7 +146,7 @@
+ 
+ public class NetworkBroadcaster(MempoolService mempoolService, NodesGroup nodes) : IBroadcaster
+ {
+-	public const int MinBroadcastNodes = 2;
++	public const int MinBroadcastNodes = 0;
+ 	public async Task<BroadcastingResult> BroadcastAsync(SmartTransaction tx, CancellationToken cancellationToken)
+ 	{
+ 		var connectedNodes = nodes.ConnectedNodes.Where(x => x.IsConnected).ToArray();
