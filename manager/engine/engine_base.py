@@ -24,7 +24,7 @@ class EngineBase:
         self.scenario: ScenarioConfig = self.default_scenario()
         self.versions = set()
         self.node: BtcNode | None = None
-        self.distributor = None  # type: ignore - Will be properly typed in subclasses
+        self.distributor = None 
         self.clients = []
         self.invoices = {}
         self.current_block = 0
