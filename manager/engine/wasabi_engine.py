@@ -41,12 +41,12 @@ class WasabiEngine(EngineBase):
                 WalletConfig(funds=[200000, 50000], wasabi=WasabiConfig(anon_score_target=7)),
                 WalletConfig(funds=[3000000], wasabi=WasabiConfig(redcoin_isolation=True)),
                 WalletConfig(funds=[1000000, 500000], wasabi=WasabiConfig(skip_rounds=[0, 1, 2])),
-                WalletConfig(funds=[3000000, 150000]),
+                WalletConfig(funds=[3000000, 15000]),
                 WalletConfig(funds=[1000000, 500000]),
                 WalletConfig(funds=[3000000, 600000]),
             ],
         )
-    
+
     def determine_backend_architecture(self) -> BackendArchitecture:
         """Determine which backend architecture to use based on scenario versions."""
         return detect_backend_architecture(self.versions)
@@ -69,9 +69,9 @@ class WasabiEngine(EngineBase):
     def start_engine_infrastructure(self):
         if self.backend_architecture is None:
             self.backend_architecture = self.determine_backend_architecture()
-        
+
         self.start_wasabi_backend()
-        
+
         if self.backend_architecture == "split":
             self.start_wasabi_coordinator()
 
@@ -81,11 +81,11 @@ class WasabiEngine(EngineBase):
             raise RuntimeError("Bitcoin node is not initialized")
         if self.backend_architecture is None:
             self.backend_architecture = self.determine_backend_architecture()
-        
+
         container_name = get_backend_container_name(self.backend_architecture)
-        
+
         wasabi_backend_ip, wasabi_backend_ports = self.driver.run(
-            "wasabi-backend",  
+            "wasabi-backend",
             f"{self.args.image_prefix}{container_name}",
             ports={37127: 37127},
             env={
@@ -96,7 +96,7 @@ class WasabiEngine(EngineBase):
             memory=8192,
         )
         sleep(1)
-        
+
         config_path = f"./containers/{container_name}/WabiSabiConfig.json"
         with open(config_path, "r") as config_file:
             backend_config = json.load(config_file)
@@ -158,9 +158,8 @@ class WasabiEngine(EngineBase):
         if self.backend is None:
             raise RuntimeError("Wasabi backend is not initialized")
 
-
         backend_address = self.backend.internal_ip
-            
+
         distributor_version = self.scenario.distributor_version or self.scenario.default_version
         wasabi_client_distributor_ip, wasabi_client_distributor_ports = self.driver.run(
             "wasabi-client-distributor",
@@ -228,9 +227,8 @@ class WasabiEngine(EngineBase):
         if self.backend is None:
             raise RuntimeError("Wasabi backend is not initialized")
 
-
         backend_address = self.backend.internal_ip
-            
+
         sleep(random.random() * 3)
         name = f"wasabi-client-{idx:03}"
         try:
@@ -388,3 +386,4 @@ class WasabiEngine(EngineBase):
                     "/home/wasabi/.walletwasabi/backend/WabiSabi/CoinJoinIdStore.txt",
                 ).split("\n")[:-1]
             )
+

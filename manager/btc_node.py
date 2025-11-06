@@ -78,11 +78,14 @@ class BtcNode:
         while True:
             try:
                 block_count = self.get_block_count()
-                if block_count > 100:
+                if block_count > 200:
                     break
             except Exception:
                 pass
             sleep(0.1)
+
+        # wait for the fee-building transactions
+        sleep(20)
 
     def create_wallet(self, wallet):
         request = {

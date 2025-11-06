@@ -11,8 +11,8 @@ import math
 import shutil
 import datetime
 
-DISTRIBUTOR_UTXOS = 20
-BATCH_SIZE = 1
+DISTRIBUTOR_UTXOS = 10
+BATCH_SIZE = 20
 BTC = 100_000_000
 
 
@@ -24,7 +24,7 @@ class EngineBase:
         self.scenario: ScenarioConfig = self.default_scenario()
         self.versions = set()
         self.node: BtcNode | None = None
-        self.distributor = None 
+        self.distributor = None
         self.clients = []
         self.invoices = {}
         self.current_block = 0
@@ -282,7 +282,7 @@ class EngineBase:
         print(f"=== Scenario {self.scenario.name} ===")
         self.prepare_images()
         self.start_infrastructure()
-        self.fund_distributor(1000)
+        self.fund_distributor(500)
         self.start_clients(self.scenario.wallets)
         self.prepare_invoices(self.scenario.wallets)
         print("Running simulation")
